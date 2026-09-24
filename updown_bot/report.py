@@ -1,11 +1,12 @@
 """Performance report from the paper ledger.
 
-    .venv/bin/python report.py            # summary to the terminal
-    .venv/bin/python report.py --csv      # also write data/report_*.csv
+    python manage.py report            # summary to the terminal
+    python manage.py report --csv      # also write data/report_*.csv
 """
 import argparse
 import csv
 import datetime as dt
+import sys
 from pathlib import Path
 
 from bot.analytics import load
@@ -25,8 +26,13 @@ def show(title, rows):
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):   # Windows consoles default to cp1252
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default="data")
+    ap.add_argument("--data", default=str(Path(__file__).resolve().parent / "data"))
     ap.add_argument("--csv", action="store_true")
     a = ap.parse_args()
     d = load(Path(a.data), recent=10**9)

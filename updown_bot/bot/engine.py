@@ -291,7 +291,6 @@ class Engine:
         atomic_write_text(self.data / "status.json", json.dumps(st))
 
     async def status_loop(self) -> None:
-        start = time.time()
         while True:
             await asyncio.sleep(self.cfg.logging.status_every_s)
             now = time.time()
@@ -314,17 +313,24 @@ class Engine:
                      self.stats["fills"], self.stats["settled"], len(self.pending), self.status["coinbase"],
                      self.status["chainlink"], self.status["clob"], " ".join(fvs) or "no active market",
                      f" | HALTED: {pf.halted}" if pf.halted else "")
-            if self.run_seconds and now - start > self.run_seconds:
-                raise SystemExit(0)
 
     async def run(self) -> None:
         self.risk.roll_day(time.time())
-        tasks = [run_chainlink(self.prices, self.status), self.books.run(), self.market_loop(), self.signal_loop(),
+        coros = [run_chainlink(self.prices, self.status), self.books.run(), self.market_loop(), self.signal_loop(),
                  self.settle_loop(), self.snapshot_loop(), self.status_loop()]
         if self.cfg.feeds.coinbase:
-            tasks.append(run_coinbase(self.prices, self.status))
+            coros.append(run_coinbase(self.prices, self.status))
+        tasks = [asyncio.create_task(c) for c in coros]
         try:
-            await asyncio.gather(*tasks)
+            # run until a task crashes (re-raised below) or, with --minutes, until the time is up
+            done, _ = await asyncio.wait(tasks, timeout=self.run_seconds, return_when=asyncio.FIRST_EXCEPTION)
+            for t in done:
+                t.result()
+            if self.run_seconds:
+                log.info("--minutes reached; stopping")
         finally:
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
             self.pf.save(self.state_path)
             self.ledger.commit()

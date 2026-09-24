@@ -12,76 +12,42 @@ It's built from what the two wallet teardowns showed (see `../POLYMARKET_BTC5M_B
 
 ---
 
-## Quick start
+## Quick start (Windows, macOS, Linux)
+
+You need **Python 3.11+** (on Windows, install it from https://www.python.org/downloads/ and tick **"Add python.exe to PATH"**) and **git**. Then:
 
 ```bash
-cd updown_bot
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+git clone https://github.com/karimkhamwani/z.git
 ```
-
-Start the bot (terminal 1):
 
 ```bash
-.venv/bin/python run.py --fresh
+cd z/updown_bot
 ```
-
-Start the dashboard (terminal 2), then open http://127.0.0.1:8766:
 
 ```bash
-.venv/bin/python dashboard.py --port 8766
+python manage.py setup
 ```
 
-Terminal report at any time:
+`setup` creates `.venv`, updates pip, installs the dependencies and runs the tests. There are only two packages, `websockets` and `certifi` (pinned in `requirements.txt`); everything else is Python's standard library. Both ship prebuilt Windows wheels (x64 and ARM64), so no compiler or Visual Studio is needed, and nothing is installed outside `.venv`. If `pip` fails (proxy, corporate certificates, offline machine), `setup` prints the fix for each case. On Windows, type `py -3` instead of `python` if `python` isn't found. On macOS/Linux it may be `python3`.
 
-```bash
-.venv/bin/python report.py
-```
+| What | Command | Windows double-click |
+|---|---|---|
+| Start paper trading (fresh $200) | `python manage.py run --fresh` | `start_bot.bat` (resumes; add `--fresh` from a terminal) |
+| Resume the saved paper portfolio | `python manage.py run` | `start_bot.bat` |
+| Dashboard (opens http://127.0.0.1:8766) | `python manage.py dashboard` | `start_dashboard.bat` |
+| Text report | `python manage.py report` (`--csv` to export) | `report.bat` |
+| Tests | `python manage.py test` | — |
 
-Run the tests:
-
-```bash
-.venv/bin/python -m unittest -v tests.test_core
-```
-
-- `run.py` resumes the saved paper portfolio (`data/portfolio.json`). `--fresh` resets it to `starting_equity`.
-- `--minutes N` stops the bot automatically after N minutes.
+- Run the bot and the dashboard in two terminals. Stop either with **Ctrl+C**; the paper portfolio is saved and resumes next time.
+- `python manage.py run --minutes 30` stops automatically after 30 minutes.
+- Paths (`config.toml`, `data/`, `certs/`) are resolved from the project folder, so the commands work from any working directory. Nothing machine-specific is committed; `.venv/`, `data/` and `certs/` are git-ignored and created locally.
 - **After startup the bot sits out the current window.** It needs Chainlink prints from the 60 seconds before a window opens to know the start price, so it starts trading at the next window boundary (at most 5 minutes). The dashboard says so.
 
-### Windows
-
-1. Install **Python 3.11 or newer** from https://www.python.org/downloads/ and tick **"Add python.exe to PATH"** in the installer.
-2. Copy the `updown_bot` folder (or unzip `updown_bot_windows.zip`) anywhere, for example `C:\bots\updown_bot`.
-3. Double-click **`setup_windows.bat`** once. It creates `.venv`, installs the two dependencies and runs the tests.
-4. Double-click **`start_bot.bat`** to start paper trading. For a fresh $200 start, run it from a terminal as `start_bot.bat --fresh`.
-5. Double-click **`start_dashboard.bat`**. It opens http://127.0.0.1:8766 in your browser.
-6. `report.bat` prints the text report.
-
-The same by hand in PowerShell:
-
-```powershell
-cd C:\bots\updown_bot
-py -3 -m venv .venv
-.venv\Scripts\python -m pip install -r requirements.txt
-.venv\Scripts\python run.py --fresh
-```
-
-Then, in a second PowerShell window:
-
-```powershell
-.venv\Scripts\python dashboard.py --port 8766
-```
-
-Windows notes:
-- **Certificates:** the bot trusts the Windows certificate store automatically, including corporate proxy roots, so you don't need the `certs/` step used on the Mac.
-- **Clock:** keep *Settings → Time & language → Set time automatically* on. The bot compares Chainlink timestamps with your PC clock, and a drift of a second or more degrades its price estimate.
-- **Sleep:** stop the PC sleeping while it runs (*Settings → System → Power*); a sleeping PC drops the websocket feeds. The watchdogs reconnect after it wakes, but the bot misses those windows.
-- **Stopping:** press Ctrl+C in the bot window. The paper portfolio is saved and resumes next time.
-
-**Corporate networks (Mac):** if Coinbase or Polymarket connections fail with `CERTIFICATE_VERIFY_FAILED`, your network is inspecting TLS. Export the Mac's trusted roots once (the bot then verifies against them):
-
-```bash
-security find-certificate -a -p /Library/Keychains/System.keychain /System/Library/Keychains/SystemRootCertificates.keychain > certs/system_ca.pem
-```
+### Platform notes
+- **Certificates / corporate networks.** The bot trusts the OS certificate store plus certifi. On Windows that already includes corporate proxy roots, so nothing to do. On macOS behind a TLS-inspecting proxy, if connections fail with `CERTIFICATE_VERIFY_FAILED`, run `python manage.py certs` once. It exports the keychain roots to `certs/system_ca.pem`, which `config.toml` picks up.
+- **Clock.** Keep automatic time sync on (Windows: *Settings → Time & language → Set time automatically*). The bot compares Chainlink timestamps with your clock, and a drift of a second or more degrades its price estimate.
+- **Sleep.** Stop the machine sleeping while the bot runs. A sleeping machine drops the websocket feeds; the watchdogs reconnect after wake-up, but those windows are missed.
+- **Line endings** are pinned by `.gitattributes` (`.bat` = CRLF, everything else LF), so a clone on any OS runs as-is.
 
 ---
 
@@ -131,6 +97,8 @@ With the defaults, an order costs at most about $4.80 (5 shares at 95¢ plus fee
 
 ## Files
 ```
+manage.py         cross-platform launcher: setup | run | dashboard | report | test | certs
+*.bat             Windows double-click shortcuts for manage.py
 run.py            start the bot          report.py      terminal report (+ --csv)
 dashboard.py      local dashboard        config.toml    every tunable parameter
 bot/model.py      TWAP fair value, vol   bot/strategy.py momentum + edge signal

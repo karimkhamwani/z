@@ -1,2 +1,6 @@
-# Auto detect text files and perform LF normalization
+# Keep line endings correct whatever OS clones the repo
 * text=auto
+*.bat text eol=crlf
+*.py text eol=lf
+*.toml text eol=lf
+*.sh text eol=lf

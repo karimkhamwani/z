@@ -12,7 +12,7 @@ timeframe = "5m"               # 5m | 15m | 1h | 4h
 
 [feeds]
 coinbase = true                # fast spot feed (leading indicator)
-ca_bundle = "certs/system_ca.pem"  # "" = certifi only. Needed on networks that inspect TLS.
+ca_bundle = "certs/system_ca.pem"  # optional extra roots; ignored if missing. macOS on a TLS-inspecting network: `python manage.py certs`
 relax_x509_strict = true       # Python 3.13 rejects some corporate CAs; chain is still verified
 
 [model]
@@ -56,6 +56,6 @@ max_drawdown_kill_pct = 0.35   # halt the bot if equity falls this far below its
 estimate_taker_rebates = true  # credit paper taker rebates by tier (from paper volume), paid at UTC midnight
 
 [logging]
-data_dir = "data"
+data_dir = "data"              # relative to this file
 snapshot_every_s = 1.0         # 1 Hz market snapshots for later tuning/replay
 status_every_s = 15

@@ -1,13 +1,14 @@
 """Run the Polymarket Up/Down momentum bot.
 
-    .venv/bin/python run.py                  # paper trading with config.toml (resumes saved paper portfolio)
-    .venv/bin/python run.py --fresh          # start over from starting_equity
-    .venv/bin/python run.py --minutes 30     # stop automatically after 30 minutes
+    python manage.py run                  # paper trading with config.toml (resumes saved paper portfolio)
+    python manage.py run --fresh          # start over from starting_equity
+    python manage.py run --minutes 30     # stop automatically after 30 minutes
 """
 import argparse
 import asyncio
 import logging
 import sys
+from pathlib import Path
 
 from bot.config import load_config
 from bot.engine import Engine
@@ -16,7 +17,7 @@ from bot.net import ssl_context
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--config", default="config.toml")
+    ap.add_argument("--config", default=str(Path(__file__).resolve().parent / "config.toml"))
     ap.add_argument("--fresh", action="store_true", help="discard the saved paper portfolio and start from starting_equity")
     ap.add_argument("--minutes", type=float, default=None, help="stop after this many minutes")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -36,8 +37,9 @@ def main() -> None:
     engine = Engine(cfg, fresh=args.fresh, run_seconds=args.minutes * 60 if args.minutes else None)
     try:
         asyncio.run(engine.run())
-    except (KeyboardInterrupt, SystemExit):
-        logging.info("stopped — portfolio saved to %s", engine.state_path)
+    except KeyboardInterrupt:
+        pass
+    logging.info("stopped — portfolio saved to %s", engine.state_path)
 
 
 if __name__ == "__main__":

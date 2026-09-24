@@ -104,7 +104,8 @@ def _build(cls, data: dict):
 
 
 def load_config(path: str | Path) -> Config:
-    raw = tomllib.loads(Path(path).read_text(encoding="utf-8"))
+    path = Path(path).resolve()
+    raw = tomllib.loads(path.read_text(encoding="utf-8"))
     cfg = Config(mode=raw.pop("mode", "paper"))
     sections = {"account": Account, "markets": Markets, "feeds": Feeds, "model": Model, "strategy": Strategy,
                 "execution": Execution, "risk": Risk, "rebates": Rebates, "logging": Logging}
@@ -113,6 +114,12 @@ def load_config(path: str | Path) -> Config:
             setattr(cfg, name, _build(cls, raw.pop(name)))
     if raw:
         raise ValueError(f"Unknown config sections: {sorted(raw)}")
+    # relative paths are relative to the config file, so the bot works from any working directory on any OS
+    base = path.parent
+    if not Path(cfg.logging.data_dir).is_absolute():
+        cfg.logging.data_dir = str(base / cfg.logging.data_dir)
+    if cfg.feeds.ca_bundle and not Path(cfg.feeds.ca_bundle).is_absolute():
+        cfg.feeds.ca_bundle = str(base / cfg.feeds.ca_bundle)
     r = cfg.risk
     if r.max_shares_per_order and r.max_shares_per_order < r.min_shares:
         raise ValueError(f"risk.max_shares_per_order ({r.max_shares_per_order}) is below risk.min_shares ({r.min_shares}); "

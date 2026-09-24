@@ -1,6 +1,6 @@
 @echo off
-REM Starts the paper bot. Add --fresh to reset to starting_equity, e.g.:  start_bot.bat --fresh
+REM Double-click shortcut for Windows. Same as:  py -3 manage.py run %*
 cd /d "%~dp0"
-set PYTHONUTF8=1
-.venv\Scripts\python run.py %*
+where py >nul 2>nul
+if %errorlevel%==0 (py -3 manage.py run %*) else (python manage.py run %*)
 pause

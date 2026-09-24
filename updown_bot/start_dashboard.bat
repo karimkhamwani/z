@@ -1,7 +1,6 @@
 @echo off
-REM Starts the dashboard and opens it in your browser.
+REM Double-click shortcut for Windows. Same as:  py -3 manage.py dashboard %*
 cd /d "%~dp0"
-set PYTHONUTF8=1
-start "" http://127.0.0.1:8766
-.venv\Scripts\python dashboard.py --port 8766
+where py >nul 2>nul
+if %errorlevel%==0 (py -3 manage.py dashboard %*) else (python manage.py dashboard %*)
 pause

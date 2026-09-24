@@ -10,3 +10,4 @@ updown_bot/data/
 __pycache__/
 *.pyc
 .DS_Store
+*.zip

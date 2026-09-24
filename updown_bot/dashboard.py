@@ -1,7 +1,7 @@
 """Local dashboard for the paper bot (no extra dependencies).
 
-    .venv/bin/python dashboard.py                 # http://127.0.0.1:8765
-    .venv/bin/python dashboard.py --port 9000 --data data
+    python manage.py dashboard                    # http://127.0.0.1:8766
+    python manage.py dashboard --port 9000 --data path/to/data
 
 Run it next to the bot; it only reads data/status.json, data/portfolio.json and data/paper.db.
 """
@@ -9,6 +9,7 @@ import argparse
 import json
 import threading
 import time
+import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -75,12 +76,16 @@ def make_handler(data: Path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default="data")
-    ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--data", default=str(Path(__file__).resolve().parent / "data"))
+    ap.add_argument("--port", type=int, default=8766)
     ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--no-browser", action="store_true", help="don't open the dashboard in a browser")
     a = ap.parse_args()
     srv = ThreadingHTTPServer((a.host, a.port), make_handler(Path(a.data)))
-    print(f"Dashboard: http://{a.host}:{a.port}   (data: {Path(a.data).resolve()})")
+    url = f"http://{a.host}:{a.port}"
+    print(f"Dashboard: {url}   (data: {Path(a.data).resolve()})   Ctrl+C to stop")
+    if not a.no_browser:
+        threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
