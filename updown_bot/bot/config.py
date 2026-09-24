@@ -28,7 +28,9 @@ class Feeds:
 class Model:
     twap_lookback_s: int = 60
     vol_halflife_s: float = 600
-    vol_floor_bp: float = 0.25
+    vol_floor_bp: float = 0.2
+    vol_change_s: int = 30
+    vol_prior_bp: float = 0.5
     basis_sigma_usd: float = 4.0
 
 

@@ -15,17 +15,19 @@ log = logging.getLogger("feeds")
 
 COINBASE_WS = "wss://ws-feed.exchange.coinbase.com"
 RTDS_WS = "wss://ws-live-data.polymarket.com"
+STALE_S = 10  # reconnect a feed that has been silent this long
 
 
 class AssetPrices:
     """Everything the model needs for one underlying."""
 
-    def __init__(self, asset: str, vol_halflife_s: float, vol_floor_bp: float):
+    def __init__(self, asset: str, vol_halflife_s: float, vol_floor_bp: float, vol_change_s: int = 30,
+                 vol_prior_bp: float = 0.5):
         self.asset = asset
         self.spot = PriceSeries()                 # Coinbase trades/ticker, keyed by local receive time
         self.chainlink = SecondBars()             # Chainlink prints keyed by their own second
         self.chainlink_local = PriceSeries()      # Chainlink prints keyed by local receive time (lag diagnostics)
-        self.vol = EwmaVol(vol_halflife_s, vol_floor_bp)
+        self.vol = EwmaVol(vol_halflife_s, vol_floor_bp, vol_change_s, vol_prior_bp)
 
     def estimate_now(self, now: float) -> float | None:
         """Best estimate of the Chainlink price right now: last print + the Coinbase move since that print."""
@@ -66,7 +68,8 @@ async def run_coinbase(assets: dict[str, AssetPrices], status: dict) -> None:
                 await ws.send(json.dumps({"type": "subscribe", "product_ids": list(products), "channels": ["ticker"]}))
                 status["coinbase"] = "up"
                 backoff = 1.0
-                async for raw in ws:
+                while True:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=STALE_S)  # TimeoutError → reconnect
                     m = json.loads(raw)
                     if m.get("type") == "ticker" and m.get("product_id") in products:
                         products[m["product_id"]].spot.add(time.time(), float(m["price"]))
@@ -79,7 +82,7 @@ async def run_coinbase(assets: dict[str, AssetPrices], status: dict) -> None:
 
 async def run_chainlink(assets: dict[str, AssetPrices], status: dict) -> None:
     by_symbol = {f"{a}/usd": p for a, p in assets.items()}
-    subs = [{"topic": "crypto_prices_chainlink", "type": "*", "filters": json.dumps({"symbol": s})} for s in by_symbol]
+    subs = [{"topic": "crypto_prices_chainlink", "type": "*", "filters": json.dumps({"symbol": s}, separators=(",", ":"))} for s in by_symbol]
     single = next(iter(by_symbol.values())) if len(by_symbol) == 1 else None
     backoff = 1.0
     while True:
@@ -89,8 +92,16 @@ async def run_chainlink(assets: dict[str, AssetPrices], status: dict) -> None:
                 pinger = asyncio.create_task(_pinger(ws, "PING", 5))
                 status["chainlink"] = "up"
                 backoff = 1.0
+                last_data = time.time()
                 try:
-                    async for raw in ws:
+                    while True:
+                        try:
+                            raw = await asyncio.wait_for(ws.recv(), timeout=2.0)
+                        except asyncio.TimeoutError:
+                            raw = None
+                        if time.time() - last_data > STALE_S:
+                            # the socket can stay open while the stream silently stops — force a reconnect
+                            raise TimeoutError(f"no Chainlink print for {STALE_S}s")
                         if not raw or raw in ("PONG", "pong"):
                             continue
                         try:
@@ -109,6 +120,8 @@ async def run_chainlink(assets: dict[str, AssetPrices], status: dict) -> None:
                             val = float(pt["value"])
                             target.chainlink.add(sec, val)
                             target.vol.update(sec, val)
+                        if points:
+                            last_data = now
                         if points and len(points) == 1:
                             target.chainlink_local.add(now, float(points[-1]["value"]))
                 finally:

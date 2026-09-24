@@ -103,25 +103,44 @@ class SecondBars:
 
 
 class EwmaVol:
-    """EWMA of squared one-second changes (USD) of the settlement series."""
+    """Per-second volatility (USD) from an EWMA of squared k-second changes of the settlement series.
 
-    def __init__(self, halflife_s: float, floor_bp: float):
+    k = 30 s matters: Chainlink prints are smoothed, so 1-second changes understate volatility by ~2x, while
+    30-second changes match real spot. Calibrated on 1,832 resolved BTC-5m markets (k=30, half-life 600 s,
+    no multiplier gave the best log-loss and a well-calibrated reliability curve). Until `warmup` observations
+    exist, sigma is at least the long-run prior."""
+
+    def __init__(self, halflife_s: float, floor_bp: float, change_s: int = 30, prior_bp: float = 0.5,
+                 warmup: int = 300):
         self.alpha = 1 - 0.5 ** (1 / halflife_s)
         self.var: float | None = None
-        self.floor_bp = floor_bp
-        self._prev: tuple[int, float] | None = None
+        self.floor_bp, self.prior_bp, self.k, self.warmup = floor_bp, prior_bp, change_s, warmup
+        self.n = 0
+        self._hist: dict[int, float] = {}
 
     def update(self, sec: int, value: float) -> None:
-        if self._prev is not None and sec > self._prev[0]:
-            dt = sec - self._prev[0]
-            if dt <= 5:
-                d2 = (value - self._prev[1]) ** 2 / dt
-                self.var = d2 if self.var is None else (1 - self.alpha) * self.var + self.alpha * d2
-        self._prev = (sec, value)
+        if sec in self._hist:
+            self._hist[sec] = value
+            return
+        self._hist[sec] = value
+        past = None
+        for d in range(3):
+            past = self._hist.get(sec - self.k - d)
+            if past is not None:
+                break
+        if past is not None:
+            d2 = (value - past) ** 2 / self.k
+            self.var = d2 if self.var is None else (1 - self.alpha) * self.var + self.alpha * d2
+            self.n += 1
+        if len(self._hist) > 4 * self.k + 60:
+            for s in [s for s in self._hist if s < sec - 2 * self.k - 10]:
+                del self._hist[s]
 
     def sigma(self, price: float) -> float:
-        floor = self.floor_bp * 1e-4 * price
-        return max(math.sqrt(self.var) if self.var is not None else 0.0, floor)
+        est = math.sqrt(self.var) if self.var is not None else 0.0
+        if self.n < self.warmup:
+            est = max(est, self.prior_bp * 1e-4 * price)
+        return max(est, self.floor_bp * 1e-4 * price)
 
 
 @dataclass

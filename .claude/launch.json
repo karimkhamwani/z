@@ -1,0 +1,9 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {"name": "dashboard-smoke", "runtimeExecutable": "/Users/KLiaquat/Desktop/z/updown_bot/.venv/bin/python",
+     "runtimeArgs": ["/Users/KLiaquat/Desktop/z/updown_bot/dashboard.py", "--data", "/private/tmp/claude-503/-Users-KLiaquat-Desktop-z/618e8bec-90e2-4dc0-aba8-6c5bb2f0b53e/scratchpad/smoke", "--port", "8765"], "port": 8765},
+    {"name": "dashboard", "runtimeExecutable": "/Users/KLiaquat/Desktop/z/updown_bot/.venv/bin/python",
+     "runtimeArgs": ["/Users/KLiaquat/Desktop/z/updown_bot/dashboard.py", "--data", "/Users/KLiaquat/Desktop/z/updown_bot/data", "--port", "8766"], "port": 8766}
+  ]
+}

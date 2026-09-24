@@ -97,7 +97,7 @@ class BookFeed:
                     await ws.send(json.dumps({"assets_ids": tokens, "type": "market"}))
                     self.status["clob"] = "up"
                     backoff = 1.0
-                    last_ping = time.time()
+                    last_ping = last_msg = time.time()
                     while not self._changed.is_set():
                         try:
                             raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
@@ -107,8 +107,11 @@ class BookFeed:
                         if now - last_ping > 10:
                             await ws.send("PING")
                             last_ping = now
+                        if now - last_msg > 30:
+                            raise TimeoutError("order book stream silent for 30s")
                         if not raw or raw == "PONG":
                             continue
+                        last_msg = now
                         try:
                             msg = json.loads(raw)
                         except ValueError:

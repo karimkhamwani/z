@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Up/Down Bot Desk</title>
+<style>
+:root{
+  --bg:#f3f5f7; --panel:#ffffff; --panel-2:#f7f9fb; --ink:#111519; --ink-2:#48515d; --ink-3:#6c7684;
+  --rule:#dde2e8; --grid:#eceff3; --accent:#2a78d6; --up:#15965f; --down:#d8413f; --warn:#b77900;
+  --model:#2a78d6; --market:#eb6834; --band:rgba(235,104,52,.14);
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root{
+  color-scheme:dark;
+  --bg:#0e1116; --panel:#151a21; --panel-2:#1a2029; --ink:#e9edf2; --ink-2:#b2bac6; --ink-3:#848d9b;
+  --rule:#262d37; --grid:#1f252e; --accent:#4b93ea; --up:#2fbf7f; --down:#ef6461; --warn:#e2a93b;
+  --model:#4b93ea; --market:#f07a45; --band:rgba(240,122,69,.16);
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--sans);padding-inline:16px;padding-block:14px 40px}
+.wrap{max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.num,td.n,th.n{font-family:var(--mono);font-variant-numeric:tabular-nums}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px}
+h1{font-size:18px;margin:0;font-weight:650;letter-spacing:-.01em}
+.mode{font:600 11px var(--mono);letter-spacing:.08em;padding:4px 8px;border-radius:4px;background:var(--accent);color:#fff}
+.pills{display:flex;gap:6px;flex-wrap:wrap}
+.pill{font:12px var(--mono);padding:3px 8px;border-radius:99px;border:1px solid var(--rule);color:var(--ink-2);display:flex;gap:6px;align-items:center}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ink-3)}
+.dot.ok{background:var(--up)} .dot.bad{background:var(--down)} .dot.warn{background:var(--warn)}
+.spacer{flex:1}
+.updated{font:12px var(--mono);color:var(--ink-3)}
+.banner{background:var(--down);color:#fff;border-radius:8px;padding:10px 14px;font-weight:600}
+.banner.info{background:var(--panel);color:var(--ink-2);border:1px solid var(--rule);font-weight:400}
+.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:10px;overflow:hidden}
+.kpi{background:var(--panel);padding:12px 14px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.kpi .l{font-size:11.5px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em}
+.kpi .v{font:600 22px/1.2 var(--mono)}
+.kpi .s{font:12px var(--mono);color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:980px){.kpis{grid-template-columns:repeat(3,1fr)}}
+@media (max-width:560px){.kpis{grid-template-columns:repeat(2,1fr)}}
+.pos{color:var(--up)} .neg{color:var(--down)}
+.grid2{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:14px}
+@media (max-width:980px){.grid2{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.ph{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.ph h2{font-size:14px;margin:0;font-weight:650}
+.ph .sub{font-size:12px;color:var(--ink-3)}
+.market{display:flex;flex-direction:column;gap:12px}
+.mtop{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+.mslug{font:13px var(--mono);color:var(--ink-2)}
+.clock{font:600 26px var(--mono)}
+.bar{height:6px;background:var(--grid);border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent)}
+.kv{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.kv div{background:var(--panel-2);border-radius:6px;padding:8px 10px;display:flex;flex-direction:column;gap:1px}
+.kv span{font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.04em}
+.kv b{font:600 15px var(--mono)}
+.scale{position:relative;height:46px;margin-top:6px}
+.scale .track{position:absolute;left:0;right:0;top:18px;height:8px;border-radius:4px;background:var(--grid)}
+.scale .bandm{position:absolute;top:14px;height:16px;background:var(--band);border:1px solid var(--market);border-radius:3px}
+.scale .mk{position:absolute;top:8px;width:3px;height:28px;background:var(--model);border-radius:2px;transform:translateX(-1px)}
+.scale .lab{position:absolute;top:36px;font:11px var(--mono);color:var(--ink-3);transform:translateX(-50%)}
+.scale .ticks span{position:absolute;top:0;font:10px var(--mono);color:var(--ink-3);transform:translateX(-50%)}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--ink-2);flex-wrap:wrap}
+.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.sides{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.side{border:1px solid var(--rule);border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:2px}
+.side .t{font-size:12px;color:var(--ink-3)}
+.side .e{font:600 16px var(--mono)}
+.side.hot{border-color:var(--up);box-shadow:inset 0 0 0 1px var(--up)}
+svg.chart{width:100%;height:auto;display:block}
+svg.chart text{fill:var(--ink-3);font:10.5px var(--mono)}
+svg.chart .gl{stroke:var(--grid)} svg.chart .ax{stroke:var(--rule)}
+.chartbox{position:relative}
+.tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--bg);font:11.5px/1.45 var(--mono);padding:6px 8px;border-radius:5px;white-space:nowrap;z-index:3}
+.tabs{display:flex;gap:4px;flex-wrap:wrap}
+.tabs button{font:12px var(--sans);border:1px solid var(--rule);background:var(--panel-2);color:var(--ink-2);padding:5px 10px;border-radius:6px;cursor:pointer}
+.tabs button[aria-selected=true]{background:var(--accent);border-color:var(--accent);color:#fff}
+.tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{padding:6px 8px;border-bottom:1px solid var(--grid);text-align:left;white-space:nowrap}
+th{font:600 10.5px var(--mono);text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3)}
+td.n,th.n{text-align:right}
+.chip{font:600 10.5px var(--mono);padding:2px 6px;border-radius:4px}
+.chip.up{background:color-mix(in srgb,var(--up) 18%,transparent);color:var(--up)}
+.chip.down{background:color-mix(in srgb,var(--down) 18%,transparent);color:var(--down)}
+.muted{color:var(--ink-3)}
+.empty{color:var(--ink-3);font-size:13px;padding:10px 0}
+.foot{font-size:12px;color:var(--ink-3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Up/Down Bot Desk</h1><span class="mode" id="mode">PAPER</span>
+    <div class="pills" id="feeds"></div>
+    <span class="spacer"></span>
+    <span class="updated" id="updated">connecting…</span>
+  </header>
+  <div id="banner" hidden></div>
+
+  <div class="kpis">
+    <div class="kpi"><span class="l">Equity</span><span class="v" id="k-eq">—</span><span class="s" id="k-eq-s"></span></div>
+    <div class="kpi"><span class="l">Net trading P&amp;L</span><span class="v" id="k-net">—</span><span class="s" id="k-net-s"></span></div>
+    <div class="kpi"><span class="l">Fees paid</span><span class="v" id="k-fee">—</span><span class="s" id="k-fee-s"></span></div>
+    <div class="kpi"><span class="l">Rebates</span><span class="v" id="k-reb">—</span><span class="s" id="k-reb-s"></span></div>
+    <div class="kpi"><span class="l">Markets</span><span class="v" id="k-mkt">—</span><span class="s" id="k-mkt-s"></span></div>
+    <div class="kpi"><span class="l">Max drawdown</span><span class="v" id="k-dd">—</span><span class="s" id="k-dd-s"></span></div>
+  </div>
+
+  <div class="grid2">
+    <section class="panel" id="live">
+      <div class="ph"><h2>Live market</h2><span class="sub" id="live-sub"></span></div>
+      <div id="live-body" class="empty">Waiting for the bot…</div>
+    </section>
+    <section class="panel">
+      <div class="ph"><h2>This window: model vs market</h2><span class="sub">P(Up) — model fair value vs Up bid/ask</span></div>
+      <div class="legend"><span><i style="background:var(--model)"></i>model P(Up)</span><span><i style="background:var(--market)"></i>Up mid</span><span><i style="background:var(--band);outline:1px solid var(--market)"></i>Up bid–ask</span><span><i style="background:var(--up)"></i>our fills</span></div>
+      <div class="chartbox" id="wbox"><svg class="chart" id="wchart" viewBox="0 0 700 260"></svg></div>
+    </section>
+  </div>
+
+  <div class="grid2">
+    <section class="panel">
+      <div class="ph"><h2>Equity</h2><span class="sub" id="eq-sub"></span></div>
+      <div class="chartbox" id="ebox"><svg class="chart" id="echart" viewBox="0 0 520 240"></svg></div>
+    </section>
+    <section class="panel">
+      <div class="ph"><h2>Where the P&amp;L comes from</h2><span class="sub">settled fills only</span></div>
+      <div class="tabs" role="tablist" id="tabs"></div>
+      <div class="tw"><table id="btable"></table></div>
+    </section>
+  </div>
+
+  <section class="panel">
+    <div class="ph"><h2>Recent fills</h2><span class="sub">paper taker fills (after simulated latency and liquidity haircut)</span></div>
+    <div class="tw"><table id="fills"></table></div>
+  </section>
+
+  <div class="grid2">
+    <section class="panel">
+      <div class="ph"><h2>Settled markets</h2></div>
+      <div class="tw"><table id="settled"></table></div>
+    </section>
+    <section class="panel">
+      <div class="ph"><h2>Skipped signals</h2><span class="sub">momentum passed, trade rejected</span></div>
+      <div class="tw"><table id="rej"></table></div>
+      <div class="ph"><h2>Daily (UTC)</h2></div>
+      <div class="tw"><table id="daily"></table></div>
+    </section>
+  </div>
+  <p class="foot" id="foot"></p>
+</div>
+<div class="tip" id="tip" hidden></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+const f2 = v => v == null ? "—" : Number(v).toFixed(2);
+const f3 = v => v == null ? "—" : Number(v).toFixed(3);
+const usd = v => v == null ? "—" : (v < 0 ? "−$" : "$") + Math.abs(v).toFixed(2);
+const sgn = v => v == null ? "—" : (v >= 0 ? "+" : "−") + "$" + Math.abs(v).toFixed(2);
+const pct = (v, d = 1) => v == null ? "—" : (v * 100).toFixed(d) + "%";
+const cls = v => v == null ? "" : v > 0 ? "pos" : v < 0 ? "neg" : "";
+const hhmmss = t => new Date(t * 1000).toLocaleTimeString([], {hour12: false});
+const el = (tag, attrs = {}, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent && parent.appendChild(e); return e; };
+const tip = $("tip");
+function showTip(evt, html, box) { tip.innerHTML = html; tip.hidden = false; const r = box.getBoundingClientRect(); let x = evt.clientX + 14, y = evt.clientY + 14; if (x + tip.offsetWidth > window.innerWidth - 8) x = evt.clientX - tip.offsetWidth - 14; tip.style.left = x + "px"; tip.style.top = (y + window.scrollY) + "px"; }
+function hideTip() { tip.hidden = true; }
+tip.style.position = "absolute";
+
+let live = null, perf = null, tab = "momentum_bp";
+
+// ---------- live ----------
+function feedPill(name, st) {
+  const ok = st === "up", off = st === "off";
+  return `<span class="pill"><span class="dot ${ok ? "ok" : off ? "" : "bad"}"></span>${name} ${ok ? "" : `<span class="muted">${st || "?"}</span>`}</span>`;
+}
+function renderLive() {
+  if (!live || live.missing) { $("updated").textContent = "no status.json yet — start the bot"; return; }
+  const age = live.age_s;
+  $("updated").textContent = age < 5 ? `live · ${hhmmss(live.ts)}` : `stale ${Math.round(age)}s — is the bot running?`;
+  $("updated").style.color = age < 5 ? "" : "var(--down)";
+  $("mode").textContent = (live.mode || "paper").toUpperCase();
+  $("feeds").innerHTML = feedPill("coinbase", live.feeds.coinbase) + feedPill("chainlink", live.feeds.chainlink) + feedPill("clob", live.feeds.clob);
+  const b = $("banner");
+  if (live.portfolio && live.halted) { b.hidden = false; b.className = "banner"; b.textContent = "HALTED — " + live.halted; }
+  else b.hidden = true;
+  const p = live.portfolio;
+  $("k-eq").textContent = usd(p.equity);
+  const ret = p.starting_equity ? p.equity / p.starting_equity - 1 : 0;
+  $("k-eq-s").innerHTML = `<span class="${cls(ret)}">${(ret >= 0 ? "+" : "") + (ret * 100).toFixed(2)}%</span> · cash ${usd(p.cash)} · open ${usd(p.open_cost)}`;
+  $("k-reb").textContent = usd(p.rebates);
+  $("k-reb-s").textContent = `tier ${(p.tier * 100).toFixed(0)}% · 30d wV ${usd(p.wv_30d)}`;
+  const c = live.config;
+  $("foot").textContent = `${c.assets.join(", ").toUpperCase()} ${c.timeframe} · signal: momentum ≥ ${c.min_momentum_bp} bp over 3 s and edge ≥ ${(c.min_edge * 100).toFixed(1)}¢ after fee · paper fills: ${c.latency_ms} ms latency, ${Math.round(c.haircut * 100)}% of displayed size · sizing ${pct(c.clip_pct_equity, 0)} of equity per order, ${pct(c.max_market_exposure_pct, 0)} per market · stops: ${pct(c.daily_loss_stop_pct, 0)} daily, ${pct(c.max_drawdown_kill_pct, 0)} drawdown · uptime ${Math.round((live.ts - live.started) / 60)} min`;
+
+  const m = (live.markets || [])[0];
+  if (!m) { $("live-body").innerHTML = `<div class="empty">No active market right now.</div>`; $("live-sub").textContent = ""; return; }
+  $("live-sub").textContent = m.slug;
+  const dur = m.end - m.start, left = Math.max(0, m.seconds_left);
+  const mm = Math.floor(left / 60), ss = Math.floor(left % 60).toString().padStart(2, "0");
+  const diff = m.x_now != null && m.reference != null ? m.x_now - m.reference : null;
+  const mom = m.momentum_bp;
+  const pos = m.position;
+  const edge = (e, side) => { const hot = e != null && e >= c.min_edge && ((side === "Up" && mom >= c.min_momentum_bp) || (side === "Down" && mom <= -c.min_momentum_bp)); return {e, hot}; };
+  const eu = edge(m.edge_up, "Up"), ed = edge(m.edge_down, "Down");
+  const x = v => (Math.min(Math.max(v, 0), 1) * 100).toFixed(2) + "%";
+  $("live-body").className = "market";
+  $("live-body").innerHTML = `
+    <div class="mtop"><span class="clock">${mm}:${ss}</span><span class="mslug">${m.asset.toUpperCase()} ${m.timeframe} · ends ${hhmmss(m.end)}</span></div>
+    <div class="bar"><i style="width:${((dur - left) / dur * 100).toFixed(1)}%"></i></div>
+    <div class="kv">
+      <div><span>Price to beat (TWAP)</span><b>${m.reference != null ? m.reference.toFixed(2) : "unknown"}</b></div>
+      <div><span>Chainlink now (est.)</span><b class="${cls(diff)}">${m.x_now != null ? m.x_now.toFixed(2) : "—"}</b></div>
+      <div><span>Distance</span><b class="${cls(diff)}">${diff != null ? (diff >= 0 ? "+" : "−") + Math.abs(diff).toFixed(2) : "—"}</b></div>
+      <div><span>3 s momentum</span><b class="${cls(mom)}">${mom != null ? (mom >= 0 ? "▲ " : "▼ ") + Math.abs(mom).toFixed(2) + " bp" : "—"}</b></div>
+      <div><span>σ per second</span><b>${m.sigma != null ? "$" + m.sigma.toFixed(2) : "—"}</b></div>
+      <div><span>Chainlink lag</span><b>${m.chainlink_age_s != null ? m.chainlink_age_s.toFixed(1) + " s" : "—"}</b></div>
+    </div>
+    <div>
+      <div class="legend"><span><i style="background:var(--model)"></i>model P(Up) <b class="num">${f3(m.p_up)}</b></span><span><i style="background:var(--band);outline:1px solid var(--market)"></i>market Up bid–ask <b class="num">${f2(m.up_bid)} – ${f2(m.up_ask)}</b></span></div>
+      <div class="scale">
+        <div class="ticks">${[0, .25, .5, .75, 1].map(t => `<span style="left:${t * 100}%">${t}</span>`).join("")}</div>
+        <div class="track"></div>
+        ${m.up_bid != null && m.up_ask != null ? `<div class="bandm" style="left:${x(m.up_bid)};width:calc(${x(m.up_ask)} - ${x(m.up_bid)})"></div>` : ""}
+        ${m.p_up != null ? `<div class="mk" style="left:${x(m.p_up)}"></div>` : ""}
+      </div>
+    </div>
+    <div class="sides">
+      <div class="side ${eu.hot ? "hot" : ""}"><span class="t">Buy Up @ ${f2(m.up_ask)} — edge after fee</span><span class="e ${cls(eu.e)}">${eu.e != null ? (eu.e * 100).toFixed(1) + "¢" : "—"}</span></div>
+      <div class="side ${ed.hot ? "hot" : ""}"><span class="t">Buy Down @ ${f2(m.down_ask)} — edge after fee</span><span class="e ${cls(ed.e)}">${ed.e != null ? (ed.e * 100).toFixed(1) + "¢" : "—"}</span></div>
+    </div>
+    ${m.reference == null ? `<div class="banner info">Not trading this window: the bot started after it opened, so it doesn't have the Chainlink prints needed for the start price. It trades from the next window (${hhmmss(m.end)}).</div>` : ""}
+    ${m.chainlink_age_s != null && m.chainlink_age_s > 10 ? `<div class="banner">Chainlink feed stale (${Math.round(m.chainlink_age_s)} s) — trading paused until it reconnects.</div>` : ""}
+    <div class="muted">${pos ? `Position: ${pos.up_shares.toFixed(2)} Up / ${pos.down_shares.toFixed(2)} Down · cost ${usd(pos.cost)} · ${pos.orders} orders` : "No position in this market."}</div>`;
+}
+
+// ---------- charts ----------
+function lineChart(svg, box, {series, xs, xDomain, yDomain, xFmt, yFmt, band, points, W, H, tipFn}) {
+  svg.innerHTML = "";
+  const L = 46, R = 12, T = 10, B = 26;
+  const [x0, x1] = xDomain, [y0, y1] = yDomain;
+  const X = v => L + (W - L - R) * (v - x0) / ((x1 - x0) || 1);
+  const Y = v => T + (H - T - B) * (1 - (v - y0) / ((y1 - y0) || 1));
+  for (let i = 0; i <= 4; i++) { const v = y0 + (y1 - y0) * i / 4; el("line", {x1: L, x2: W - R, y1: Y(v), y2: Y(v), class: i ? "gl" : "ax"}, svg); el("text", {x: L - 6, y: Y(v) + 3.5, "text-anchor": "end"}, svg).textContent = yFmt(v); }
+  for (let i = 0; i <= 5; i++) { const v = x0 + (x1 - x0) * i / 5; el("text", {x: X(v), y: H - 8, "text-anchor": "middle"}, svg).textContent = xFmt(v); }
+  if (band) { let d = ""; const up = [], dn = []; band.forEach((b, i) => { if (b && b[0] != null && b[1] != null) { up.push([X(xs[i]), Y(b[1])]); dn.push([X(xs[i]), Y(b[0])]); } }); if (up.length > 1) { d = "M" + up.map(p => p.join(",")).join("L") + "L" + dn.reverse().map(p => p.join(",")).join("L") + "Z"; el("path", {d, fill: "var(--band)", stroke: "none"}, svg); } }
+  for (const s of series) {
+    let d = "", pen = false;
+    s.values.forEach((v, i) => { if (v == null) { pen = false; return; } d += (pen ? "L" : "M") + X(xs[i]).toFixed(1) + "," + Y(v).toFixed(1); pen = true; });
+    el("path", {d, fill: "none", stroke: s.color, "stroke-width": 2, "stroke-linejoin": "round"}, svg);
+  }
+  (points || []).forEach(p => el("circle", {cx: X(p.x), cy: Y(p.y), r: 4.5, fill: p.color, stroke: "var(--panel)", "stroke-width": 2}, svg));
+  const cross = el("line", {y1: T, y2: H - B, stroke: "var(--ink-3)", "stroke-dasharray": "3 3", visibility: "hidden"}, svg);
+  const hit = el("rect", {x: L, y: T, width: W - L - R, height: H - T - B, fill: "transparent"}, svg);
+  hit.addEventListener("mousemove", e => {
+    const r = svg.getBoundingClientRect(); const px = (e.clientX - r.left) / r.width * W;
+    let best = 0, bd = 1e9; xs.forEach((v, i) => { const d = Math.abs(X(v) - px); if (d < bd) { bd = d; best = i; } });
+    cross.setAttribute("x1", X(xs[best])); cross.setAttribute("x2", X(xs[best])); cross.setAttribute("visibility", "visible");
+    showTip(e, tipFn(best), box);
+  });
+  hit.addEventListener("mouseleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+}
+
+async function renderWindow() {
+  const m = live && (live.markets || [])[0];
+  const svg = $("wchart");
+  if (!m) { svg.innerHTML = ""; return; }
+  const snaps = await (await fetch("/api/market?slug=" + encodeURIComponent(m.slug))).json();
+  if (!snaps.length) return;
+  const xs = snaps.map(s => s.seconds_left);
+  const dur = m.end - m.start;
+  const fills = perf && perf.recent_fills ? perf.recent_fills.filter(f => f.slug === m.slug) : [];
+  const pts = fills.map(f => ({x: Math.max(0, f.seconds_left), y: f.outcome === "Up" ? f.avg_price : 1 - f.avg_price, color: f.outcome === "Up" ? "var(--up)" : "var(--down)"}));
+  lineChart(svg, $("wbox"), {
+    W: 700, H: 260, xs, xDomain: [dur, 0], yDomain: [0, 1], xFmt: v => Math.round(v) + "s", yFmt: v => v.toFixed(2),
+    band: snaps.map(s => [s.up_bid, s.up_ask]),
+    series: [{color: "var(--market)", values: snaps.map(s => s.up_bid != null && s.up_ask != null ? (s.up_bid + s.up_ask) / 2 : null)},
+             {color: "var(--model)", values: snaps.map(s => s.p_up)}],
+    points: pts,
+    tipFn: i => { const s = snaps[i]; return `${Math.round(s.seconds_left)}s left<br>model P(Up) ${f3(s.p_up)}<br>Up bid/ask ${f2(s.up_bid)} / ${f2(s.up_ask)}<br>Down bid/ask ${f2(s.down_bid)} / ${f2(s.down_ask)}<br>est ${s.x_now != null ? s.x_now.toFixed(2) : "—"} vs ref ${s.reference != null ? s.reference.toFixed(2) : "—"}<br>3s mom ${s.momentum_bp != null ? s.momentum_bp.toFixed(2) + " bp" : "—"}`; }
+  });
+}
+
+function renderEquity() {
+  const c = perf && perf.equity_curve || [];
+  const svg = $("echart");
+  if (c.length < 2) { svg.innerHTML = `<text x="260" y="120" text-anchor="middle">equity curve appears after a few status ticks</text>`; return; }
+  const xs = c.map(r => r.ts), ys = c.map(r => r.equity);
+  let lo = Math.min(...ys), hi = Math.max(...ys); const pad = Math.max((hi - lo) * 0.15, 1); lo -= pad; hi += pad;
+  const start = perf.summary.starting_equity;
+  lineChart(svg, $("ebox"), {
+    W: 520, H: 240, xs, xDomain: [xs[0], xs[xs.length - 1]], yDomain: [lo, hi],
+    xFmt: v => new Date(v * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", hour12: false}), yFmt: v => "$" + v.toFixed(0),
+    series: [{color: "var(--accent)", values: ys}, {color: "var(--ink-3)", values: ys.map(() => start)}],
+    tipFn: i => `${new Date(c[i].ts * 1000).toLocaleString([], {hour12: false})}<br>equity ${usd(c[i].equity)}<br>cash ${usd(c[i].cash)} · open ${usd(c[i].open_cost)}`
+  });
+  $("eq-sub").textContent = `start ${usd(start)} · peak ${usd(perf.summary.peak)}`;
+}
+
+// ---------- perf tables ----------
+function table(id, cols, rows, empty) {
+  const t = $(id);
+  if (!rows || !rows.length) { t.innerHTML = `<tr><td class="empty">${empty}</td></tr>`; return; }
+  t.innerHTML = "<thead><tr>" + cols.map(c => `<th class="${c.n ? "n" : ""}">${c.h}</th>`).join("") + "</tr></thead><tbody>" +
+    rows.map(r => "<tr>" + cols.map(c => `<td class="${c.n ? "n" : ""} ${c.cls ? c.cls(r) : ""}">${c.f(r)}</td>`).join("") + "</tr>").join("") + "</tbody>";
+}
+const outcomeChip = o => `<span class="chip ${o === "Up" ? "up" : "down"}">${o}</span>`;
+function renderPerf() {
+  if (!perf || perf.empty) return;
+  const s = perf.summary;
+  $("k-net").innerHTML = `<span class="${cls(s.net_trading_pnl)}">${sgn(s.net_trading_pnl)}</span>`;
+  $("k-net-s").textContent = `${s.net_pct >= 0 ? "+" : ""}${s.net_pct.toFixed(2)}% of ${usd(s.notional)} · pre-fee ${sgn(s.gross_pnl)}`;
+  $("k-fee").textContent = usd(s.fees);
+  $("k-fee-s").textContent = s.notional ? `${(s.fees / s.notional * 100).toFixed(2)}% of notional` : "";
+  $("k-mkt").textContent = s.markets_settled;
+  $("k-mkt-s").textContent = s.market_win_rate != null ? `win ${pct(s.market_win_rate)} · ${s.fills} fills · ${s.open_positions} open` : `${s.fills} fills · ${s.open_positions} open`;
+  $("k-dd").textContent = pct(s.max_drawdown);
+  const a = s.model_settlement_agreement;
+  $("k-dd-s").textContent = a[1] ? `model settle match ${a[0]}/${a[1]}` : "";
+  // tabs
+  const tabs = $("tabs");
+  if (!tabs.children.length) {
+    for (const [k, v] of Object.entries(perf.tables)) {
+      const b = document.createElement("button"); b.textContent = v.title.replace("Calibration: model fair value vs actual win rate", "Calibration"); b.setAttribute("role", "tab"); b.dataset.k = k;
+      b.onclick = () => { tab = k; renderPerf(); }; tabs.appendChild(b);
+    }
+  }
+  [...tabs.children].forEach(b => b.setAttribute("aria-selected", b.dataset.k === tab));
+  table("btable", [
+    {h: "bucket", f: r => r.bucket}, {h: "fills", n: 1, f: r => r.fills}, {h: "notional", n: 1, f: r => usd(r.notional)},
+    {h: "net P&L", n: 1, f: r => sgn(r.pnl), cls: r => cls(r.pnl)}, {h: "% of notional", n: 1, f: r => r.pnl_pct == null ? "—" : r.pnl_pct.toFixed(2) + "%", cls: r => cls(r.pnl_pct)},
+    {h: "win rate", n: 1, f: r => pct(r.win_rate)}, {h: "avg model fair", n: 1, f: r => f3(r.avg_fair)}
+  ], perf.tables[tab].rows.filter(r => r.fills), "No settled fills yet.");
+  table("fills", [
+    {h: "time", f: r => hhmmss(r.ts)}, {h: "market", f: r => r.slug.replace("-updown-", " ").replace(/-(\d+)$/, (m, t) => " " + hhmmss(+t).slice(0, 5))},
+    {h: "side", f: r => outcomeChip(r.outcome)}, {h: "shares", n: 1, f: r => r.shares.toFixed(2)}, {h: "avg px", n: 1, f: r => f3(r.avg_price)},
+    {h: "cash", n: 1, f: r => usd(r.cash)}, {h: "fee", n: 1, f: r => usd(r.fee)}, {h: "fair", n: 1, f: r => f3(r.fair)},
+    {h: "edge", n: 1, f: r => (r.edge * 100).toFixed(1) + "¢", cls: r => cls(r.edge)}, {h: "mom", n: 1, f: r => r.momentum_bp.toFixed(2) + "bp"},
+    {h: "left", n: 1, f: r => Math.round(r.seconds_left) + "s"},
+    {h: "result", n: 1, f: r => r.won == null ? '<span class="muted">open</span>' : sgn(r.pnl), cls: r => r.won == null ? "" : cls(r.pnl)}
+  ], perf.recent_fills, "No fills yet. The bot only trades when momentum and edge line up — this can take a while.");
+  table("settled", [
+    {h: "time", f: r => hhmmss(r.ts)}, {h: "market", f: r => r.slug.replace("-updown-", " ")}, {h: "winner", f: r => outcomeChip(r.winner)},
+    {h: "model", f: r => r.model_winner ? (r.model_winner === r.winner ? "✓" : "✗ " + r.model_winner) : "—"},
+    {h: "Up/Down sh", n: 1, f: r => `${r.up_shares.toFixed(1)} / ${r.down_shares.toFixed(1)}`}, {h: "cost", n: 1, f: r => usd(r.cost)},
+    {h: "payout", n: 1, f: r => usd(r.payout)}, {h: "P&L", n: 1, f: r => sgn(r.pnl), cls: r => cls(r.pnl)}, {h: "equity", n: 1, f: r => usd(r.equity_after)}
+  ], perf.recent_settlements, "Nothing settled yet.");
+  table("rej", [{h: "reason", f: r => r.reason.replaceAll("_", " ")}, {h: "count", n: 1, f: r => r.n}, {h: "avg edge", n: 1, f: r => r.avg_edge == null ? "—" : (r.avg_edge * 100).toFixed(1) + "¢"}], perf.rejections, "None yet.");
+  table("daily", [{h: "day", f: r => r.day}, {h: "fills", n: 1, f: r => r.fills}, {h: "notional", n: 1, f: r => usd(r.notional)}, {h: "fees", n: 1, f: r => usd(r.fees)}, {h: "net P&L", n: 1, f: r => sgn(r.pnl), cls: r => cls(r.pnl)}], perf.daily, "No settled days yet.");
+}
+
+// ---------- loops ----------
+async function pollLive() { try { live = await (await fetch("/api/live")).json(); renderLive(); } catch (e) { $("updated").textContent = "dashboard server unreachable"; } }
+async function pollPerf() { try { perf = await (await fetch("/api/perf")).json(); renderPerf(); renderEquity(); } catch (e) {} }
+async function pollWindow() { try { await renderWindow(); } catch (e) {} }
+pollLive(); pollPerf(); setTimeout(pollWindow, 400);
+setInterval(pollLive, 1000); setInterval(pollPerf, 5000); setInterval(pollWindow, 2000);
+</script>
+</body>
+</html>
