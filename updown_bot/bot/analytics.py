@@ -180,3 +180,18 @@ def fills_csv(data: Path) -> str:
     for r in cur:
         w.writerow([dt.datetime.fromtimestamp(r["ts"], dt.UTC).strftime("%Y-%m-%d %H:%M:%S"), *r])
     return buf.getvalue()
+
+
+def orders_page(data: Path, offset: int = 0, limit: int = 50) -> dict:
+    """Live/shadow order log: every order sent (or that shadow mode would have sent) and the exchange's answer."""
+    db = connect(Path(data))
+    if db is None:
+        return {"total": 0, "rows": [], "by_status": []}
+    try:
+        n = db.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
+    except sqlite3.OperationalError:          # paper ledgers created before live mode existed
+        return {"total": 0, "rows": [], "by_status": []}
+    rows = db.execute("SELECT * FROM orders ORDER BY ts DESC LIMIT ? OFFSET ?", (limit, offset)).fetchall()
+    by = db.execute("SELECT COALESCE(NULLIF(code,''), status) k, COUNT(*) n FROM orders GROUP BY k ORDER BY n DESC").fetchall()
+    return {"total": n, "offset": offset, "limit": limit, "rows": [dict(r) for r in rows],
+            "by_status": [dict(r) for r in by]}

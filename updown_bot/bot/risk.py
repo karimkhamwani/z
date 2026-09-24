@@ -31,7 +31,7 @@ class RiskManager:
         pf = self.pf
         eq = pf.equity
         pf.peak_equity = max(pf.peak_equity, eq)
-        if pf.halted.startswith("drawdown"):
+        if pf.halted.startswith(("drawdown", "live")):
             return pf.halted
         if eq <= pf.peak_equity * (1 - self.cfg.max_drawdown_kill_pct):
             pf.halted = f"drawdown kill: equity {eq:.2f} is {self.cfg.max_drawdown_kill_pct:.0%} below peak {pf.peak_equity:.2f}"

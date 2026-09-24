@@ -75,6 +75,8 @@ class Portfolio:
     realized_pnl: float = 0.0
     rebates_total: float = 0.0
     halted: str = ""
+    positions_value: float | None = None   # live: market value of all positions, from the exchange
+    last_sync: float = 0.0
 
     @property
     def open_cost(self) -> float:
@@ -82,7 +84,10 @@ class Portfolio:
 
     @property
     def equity(self) -> float:
-        """Cash plus open positions at cost (conservative; used for sizing and stops)."""
+        """Paper: cash + open positions at cost. Live: the portfolio balance — pUSD cash + current value of every
+        position, as synced from Polymarket."""
+        if self.positions_value is not None:
+            return self.cash + self.positions_value
         return self.cash + self.open_cost
 
     def wv_30d(self, today: str) -> float:
@@ -170,13 +175,16 @@ class PaperExecutor:
                     seconds_left=context["seconds_left"] - self.latency, signal_ask=context["ask"], levels=levels)
 
 
-def settle(pf: Portfolio, condition_id: str, winner: str) -> dict | None:
+def settle(pf: Portfolio, condition_id: str, winner: str, credit_cash: bool = True) -> dict | None:
+    """Close a position at resolution and record its P&L. In live mode cash isn't credited here: the payout
+    reaches the balance when the position is redeemed, and the account sync picks it up."""
     pos = pf.positions.pop(condition_id, None)
     if pos is None:
         return None
     payout = 0.5 * (pos.up_shares + pos.down_shares) if winner == "Split" else pos.shares(winner)
     pnl = payout - pos.cost
-    pf.cash += payout
+    if credit_cash:
+        pf.cash += payout
     pf.realized_pnl += pnl
     pf.peak_equity = max(pf.peak_equity, pf.equity)
     return {"slug": pos.slug, "condition_id": condition_id, "winner": winner, "up_shares": pos.up_shares,

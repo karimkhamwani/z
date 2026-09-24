@@ -1,3 +1,5 @@
-# Both ship prebuilt wheels for Windows (x64 + ARM64), macOS and Linux — no compiler needed.
+# All ship prebuilt wheels for Windows (x64 + ARM64), macOS and Linux — no compiler needed.
 websockets>=13,<18
 certifi>=2024.2.2
+# Official Polymarket SDK — used only by shadow/live modes. Pre-1.0: pinned to the tested minor version.
+polymarket-client>=0.11,<0.12

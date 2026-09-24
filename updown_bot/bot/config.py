@@ -75,6 +75,19 @@ class Rebates:
 
 
 @dataclass
+class Live:
+    data_dir: str = "data_live"          # live/shadow keep their own ledger, separate from paper
+    sync_every_s: float = 15             # read the portfolio balance (cash + positions) this often
+    redeem_winnings: bool = True         # claim resolved winning positions (needs a Relayer API key)
+    cancel_all_on_start: bool = True     # cancel any resting orders at start and on shutdown
+    order_timeout_s: float = 10
+    max_consecutive_errors: int = 5      # halt new orders after this many errors in a row
+    max_orders_per_minute: int = 20
+    min_cash_usd: float = 5              # don't open positions when pUSD cash is below this
+    require_confirmation: bool = True    # type LIVE at startup (skip with --yes, e.g. under a service manager)
+
+
+@dataclass
 class Logging:
     data_dir: str = "data"
     snapshot_every_s: float = 1.0
@@ -92,6 +105,7 @@ class Config:
     execution: Execution = field(default_factory=Execution)
     risk: Risk = field(default_factory=Risk)
     rebates: Rebates = field(default_factory=Rebates)
+    live: Live = field(default_factory=Live)
     logging: Logging = field(default_factory=Logging)
 
 
@@ -108,7 +122,7 @@ def load_config(path: str | Path) -> Config:
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
     cfg = Config(mode=raw.pop("mode", "paper"))
     sections = {"account": Account, "markets": Markets, "feeds": Feeds, "model": Model, "strategy": Strategy,
-                "execution": Execution, "risk": Risk, "rebates": Rebates, "logging": Logging}
+                "execution": Execution, "risk": Risk, "rebates": Rebates, "live": Live, "logging": Logging}
     for name, cls in sections.items():
         if name in raw:
             setattr(cfg, name, _build(cls, raw.pop(name)))
@@ -116,6 +130,10 @@ def load_config(path: str | Path) -> Config:
         raise ValueError(f"Unknown config sections: {sorted(raw)}")
     # relative paths are relative to the config file, so the bot works from any working directory on any OS
     base = path.parent
+    if cfg.mode not in ("paper", "shadow", "live"):
+        raise ValueError('mode must be "paper", "shadow" or "live"')
+    if cfg.mode in ("shadow", "live"):   # real-account modes write to their own folder
+        cfg.logging.data_dir = cfg.live.data_dir
     if not Path(cfg.logging.data_dir).is_absolute():
         cfg.logging.data_dir = str(base / cfg.logging.data_dir)
     if cfg.feeds.ca_bundle and not Path(cfg.feeds.ca_bundle).is_absolute():

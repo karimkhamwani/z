@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from bot.analytics import fills_csv, fills_page, load, market_snapshots, settlements_page
+from bot.analytics import fills_csv, fills_page, load, market_snapshots, orders_page, settlements_page
 
 HERE = Path(__file__).parent
 PAGE = HERE / "dashboard" / "index.html"
@@ -73,6 +73,10 @@ def make_handler(data: Path):
                     self._json(settlements_page(data, offset=max(0, int(q.get("offset", ["0"])[0])),
                                                 limit=min(500, max(1, int(q.get("limit", ["50"])[0]))),
                                                 result=q.get("result", ["all"])[0]))
+                elif u.path == "/api/orders":
+                    q = parse_qs(u.query)
+                    self._json(orders_page(data, offset=max(0, int(q.get("offset", ["0"])[0])),
+                                           limit=min(500, max(1, int(q.get("limit", ["50"])[0])))))
                 elif u.path == "/fills.csv":
                     body = fills_csv(data).encode("utf-8")
                     self.send_response(200)
@@ -97,7 +101,10 @@ def main():
     ap.add_argument("--port", type=int, default=8766)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--no-browser", action="store_true", help="don't open the dashboard in a browser")
+    ap.add_argument("--live", action="store_true", help="show the live/shadow ledger (data_live/) instead of paper")
     a = ap.parse_args()
+    if a.live:
+        a.data = str(Path(__file__).resolve().parent / "data_live")
     srv = ThreadingHTTPServer((a.host, a.port), make_handler(Path(a.data)))
     url = f"http://{a.host}:{a.port}"
     print(f"Dashboard: {url}   (data: {Path(a.data).resolve()})   Ctrl+C to stop")

@@ -2,3 +2,7 @@
 data/
 __pycache__/
 *.pyc
+
+# live-trading secrets and ledger — never commit
+.env
+data_live/

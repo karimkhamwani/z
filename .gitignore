@@ -11,3 +11,7 @@ __pycache__/
 *.pyc
 .DS_Store
 *.zip
+
+# live-trading secrets and ledger — never commit
+.env
+data_live/

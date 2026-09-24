@@ -2,6 +2,8 @@
   "version": "0.0.1",
   "configurations": [
     {"name": "dashboard", "runtimeExecutable": "/Users/KLiaquat/Desktop/z/updown_bot/.venv/bin/python",
-     "runtimeArgs": ["/Users/KLiaquat/Desktop/z/updown_bot/dashboard.py", "--data", "/Users/KLiaquat/Desktop/z/updown_bot/data", "--port", "8766", "--no-browser"], "port": 8766}
+     "runtimeArgs": ["/Users/KLiaquat/Desktop/z/updown_bot/dashboard.py", "--data", "/Users/KLiaquat/Desktop/z/updown_bot/data", "--port", "8766", "--no-browser"], "port": 8766},
+    {"name": "dashboard-live", "runtimeExecutable": "/Users/KLiaquat/Desktop/z/updown_bot/.venv/bin/python",
+     "runtimeArgs": ["/Users/KLiaquat/Desktop/z/updown_bot/dashboard.py", "--live", "--port", "8767", "--no-browser"], "port": 8767}
   ]
 }

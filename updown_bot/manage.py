@@ -5,6 +5,9 @@
     python manage.py dashboard [--port 8766]
     python manage.py report [--csv]
     python manage.py test
+    python manage.py preflight             live account check: keys, wallet type, balance, positions (no orders)
+    python manage.py run --live            real-money trading (also needs mode = "live" in config.toml)
+    python manage.py dashboard --live      dashboard for the live/shadow ledger (data_live/)
     python manage.py certs                 macOS only: trust the keychain's roots (networks that inspect TLS)
 
 On Windows use `py -3 manage.py ...` if `python` isn't on PATH. Any command sets up .venv first if it's missing.
@@ -106,6 +109,9 @@ def main() -> None:
         test()
     elif cmd == "certs":
         certs()
+    elif cmd == "preflight":
+        ensure_venv()
+        sys.exit(call([str(VENV_PY), "run.py", "--preflight", *rest]))
     elif cmd in SCRIPTS:
         ensure_venv()
         sys.exit(call([str(VENV_PY), SCRIPTS[cmd], *rest]))

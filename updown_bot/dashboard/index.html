@@ -25,6 +25,10 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--sans);p
 header{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px}
 h1{font-size:18px;margin:0;font-weight:650;letter-spacing:-.01em}
 .mode{font:600 11px var(--mono);letter-spacing:.08em;padding:4px 8px;border-radius:4px;background:var(--accent);color:#fff}
+.mode.live{background:var(--down)} .mode.shadow{background:var(--warn);color:#111}
+.acct{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:10px 14px;font:12.5px var(--mono);color:var(--ink-2)}
+.acct.live{border-color:var(--down);box-shadow:inset 3px 0 0 var(--down)} .acct.shadow{border-color:var(--warn);box-shadow:inset 3px 0 0 var(--warn)}
+.acct b{color:var(--ink);font-weight:600}
 .pills{display:flex;gap:6px;flex-wrap:wrap}
 .pill{font:12px var(--mono);padding:3px 8px;border-radius:99px;border:1px solid var(--rule);color:var(--ink-2);display:flex;gap:6px;align-items:center}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--ink-3)}
@@ -112,6 +116,7 @@ td.n,th.n{text-align:right}
     <span class="updated" id="updated">connecting…</span>
   </header>
   <div id="banner" hidden></div>
+  <div class="acct" id="acct" hidden></div>
 
   <div class="kpis">
     <div class="kpi"><span class="l">Equity</span><span class="v" id="k-eq">—</span><span class="s" id="k-eq-s"></span></div>
@@ -145,6 +150,13 @@ td.n,th.n{text-align:right}
       <div class="tw"><table id="btable"></table></div>
     </section>
   </div>
+
+  <section class="panel" id="orders-panel" hidden>
+    <div class="ph"><h2>Orders</h2><span class="sub">every order sent to Polymarket (shadow: would have been sent) and the exchange's answer, newest first</span></div>
+    <div class="sumline" id="o-sum"></div>
+    <div class="tw"><table id="orders"></table></div>
+    <div class="toolbar"><span class="spacer"></span><span class="pager" id="o-pager"></span></div>
+  </section>
 
   <section class="panel">
     <div class="ph"><h2>All fills</h2><span class="sub">paper taker fills (after simulated latency and liquidity haircut), newest first</span></div>
@@ -213,7 +225,22 @@ function renderLive() {
   const age = live.age_s;
   $("updated").textContent = age < 5 ? `live · ${hhmmss(live.ts)}` : `stale ${Math.round(age)}s — is the bot running?`;
   $("updated").style.color = age < 5 ? "" : "var(--down)";
-  $("mode").textContent = (live.mode || "paper").toUpperCase();
+  const mode = live.mode || "paper";
+  $("mode").textContent = mode === "live" ? "LIVE · REAL MONEY" : mode.toUpperCase();
+  $("mode").className = "mode " + mode;
+  document.title = (mode === "live" ? "● LIVE — " : mode === "shadow" ? "SHADOW — " : "") + "Up/Down Bot Desk";
+  const L = live.live, acct = $("acct");
+  if (L) {
+    acct.hidden = false; acct.className = "acct " + mode;
+    const sync = L.sync_age_s == null ? "not yet" : Math.round(L.sync_age_s) + "s ago";
+    acct.innerHTML = `<span>wallet <b>${L.wallet}</b> (${L.wallet_type})</span>
+      <span>pUSD cash <b>${usd(L.cash)}</b></span><span>positions <b>${usd(L.positions_value)}</b> (${L.open_positions ?? 0} open${L.redeemable ? `, ${L.redeemable} to claim` : ""})</span>
+      <span>balance synced <b style="color:${L.sync_age_s != null && L.sync_age_s < 60 ? "" : "var(--down)"}">${sync}</b></span>
+      <span>claiming <b>${L.can_redeem ? "automatic" : "manual"}</b></span>
+      <span>kill switch <b style="color:${L.kill_switch ? "var(--down)" : ""}">${L.kill_switch ? "ON — no new orders" : "off"}</b></span>
+      ${mode === "shadow" ? "<span><b>orders are not sent</b></span>" : ""}${L.error ? `<span style="color:var(--down)">sync error: ${L.error}</span>` : ""}
+      ${L.cash != null && L.cash < L.min_cash_usd ? `<span style="color:var(--down)">cash below $${L.min_cash_usd}: not opening positions</span>` : ""}`;
+  } else acct.hidden = true;
   $("feeds").innerHTML = feedPill("coinbase", live.feeds.coinbase) + feedPill("chainlink", live.feeds.chainlink) + feedPill("clob", live.feeds.clob);
   const b = $("banner");
   if (live.portfolio && live.halted) { b.hidden = false; b.className = "banner"; b.textContent = "HALTED — " + live.halted; }
@@ -221,7 +248,8 @@ function renderLive() {
   const p = live.portfolio;
   $("k-eq").textContent = usd(p.equity);
   const ret = p.starting_equity ? p.equity / p.starting_equity - 1 : 0;
-  $("k-eq-s").innerHTML = `<span class="${cls(ret)}">${(ret >= 0 ? "+" : "") + (ret * 100).toFixed(2)}%</span> · cash ${usd(p.cash)} · open ${usd(p.open_cost)}`;
+  $("k-eq-s").innerHTML = `<span class="${cls(ret)}">${(ret >= 0 ? "+" : "") + (ret * 100).toFixed(2)}%</span> · cash ${usd(p.cash)} · ` +
+    (p.positions_value != null ? `positions ${usd(p.positions_value)}` : `open ${usd(p.open_cost)}`);
   $("k-reb").textContent = usd(p.rebates);
   $("k-reb-s").textContent = `tier ${(p.tier * 100).toFixed(0)}% · 30d wV ${usd(p.wv_30d)}`;
   const c = live.config;
@@ -429,6 +457,26 @@ async function loadSettled() {
   table("settled", SETTLED_COLS, d.rows, sState.result === "all" ? "Nothing settled yet." : "No markets match this filter.");
   pager("s-pager", sState, d.total, () => safe("settled", loadSettled));
 }
+const oState = {offset: 0};
+const ORDER_COLS = [
+  {h: "time", f: r => new Date(r.ts * 1000).toLocaleString([], {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false})},
+  {h: "market", f: r => r.slug.replace("-updown-", " ").replace(/-(\d+)$/, (m, t) => " " + hhmmss(+t).slice(0, 5))},
+  {h: "side", f: r => outcomeChip(r.outcome)}, {h: "amount", n: 1, f: r => usd(r.amount)}, {h: "max spend", n: 1, f: r => usd(r.max_spend)},
+  {h: "max px", n: 1, f: r => f2(r.max_price)},
+  {h: "result", f: r => { const k = r.code || r.status; const good = r.status === "matched" && r.filled_shares > 0;
+      return `<span class="chip ${good ? "up" : (r.ok ? "" : "down")}">${k}</span>`; }},
+  {h: "filled", n: 1, f: r => r.filled_shares ? `${Number(r.filled_shares).toFixed(2)} sh / ${usd(r.filled_usd)}` : "—"},
+  {h: "latency", n: 1, f: r => r.latency_s ? Math.round(r.latency_s * 1000) + " ms" : "—"},
+  {h: "detail", f: r => `<span class="muted">${(r.message || "").slice(0, 80)}</span>`}
+];
+async function loadOrders() {
+  if (!live || !live.mode || live.mode === "paper") { $("orders-panel").hidden = true; return; }
+  $("orders-panel").hidden = false;
+  const d = await (await fetch(`/api/orders?offset=${oState.offset}&limit=${PAGE}`)).json();
+  $("o-sum").textContent = d.total ? d.by_status.map(b => `${b.k} ${b.n}`).join(" · ") : "";
+  table("orders", ORDER_COLS, d.rows, live.mode === "shadow" ? "No orders yet (shadow mode logs what it would send)." : "No orders sent yet.");
+  pager("o-pager", oState, d.total, () => safe("orders", loadOrders));
+}
 segment("f-result", fState, "result", () => safe("fills", loadFills));
 segment("f-side", fState, "side", () => safe("fills", loadFills));
 segment("s-result", sState, "result", () => safe("settled", loadSettled));
@@ -437,8 +485,8 @@ segment("s-result", sState, "result", () => safe("settled", loadSettled));
 async function pollLive() { try { live = await (await fetch("/api/live")).json(); } catch (e) { $("updated").textContent = "dashboard server unreachable"; return; } safe("live", renderLive); }
 async function pollPerf() { try { perf = await (await fetch("/api/perf")).json(); } catch (e) { console.error("dashboard: /api/perf failed", e); return; } safe("perf", renderPerf); safe("equity", renderEquity); }
 async function pollWindow() { try { await renderWindow(); } catch (e) { console.error("dashboard: window chart failed", e); } }
-async function pollTables() { try { await loadFills(); } catch (e) { console.error("dashboard: fills failed", e); } try { await loadSettled(); } catch (e) { console.error("dashboard: settled failed", e); } }
-pollLive(); pollPerf(); pollTables(); setTimeout(pollWindow, 400);
+async function pollTables() { try { await loadFills(); } catch (e) { console.error("dashboard: fills failed", e); } try { await loadSettled(); } catch (e) { console.error("dashboard: settled failed", e); } try { await loadOrders(); } catch (e) { console.error("dashboard: orders failed", e); } }
+pollLive().then(pollTables); pollPerf(); setTimeout(pollWindow, 400);
 setInterval(pollLive, 1000); setInterval(pollPerf, 5000); setInterval(pollWindow, 2000); setInterval(pollTables, 5000);
 </script>
 </body>

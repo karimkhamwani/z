@@ -21,6 +21,11 @@ CREATE TABLE IF NOT EXISTS equity (
   ts REAL, cash REAL, open_cost REAL, equity REAL, peak REAL, realized REAL, rebates REAL, halted TEXT);
 CREATE TABLE IF NOT EXISTS rebates (day TEXT, fees REAL, wv_30d REAL, rate REAL, rebate REAL);
 CREATE TABLE IF NOT EXISTS events (ts REAL, kind TEXT, detail TEXT);
+CREATE TABLE IF NOT EXISTS orders (
+  ts REAL, slug TEXT, condition_id TEXT, outcome TEXT, amount REAL, max_spend REAL, max_price REAL, ok INTEGER,
+  status TEXT, code TEXT, message TEXT, latency_s REAL, order_id TEXT, filled_usd REAL, filled_shares REAL);
+CREATE TABLE IF NOT EXISTS account (
+  ts REAL, cash REAL, positions_value REAL, equity REAL, open_positions INTEGER, redeemable INTEGER, raw_balance INTEGER);
 CREATE INDEX IF NOT EXISTS ix_snap ON snapshots(slug, ts);
 """
 
@@ -45,6 +50,8 @@ class Ledger:
     def snapshot(self, row: dict) -> None: self._ins("snapshots", row)
     def equity(self, row: dict) -> None: self._ins("equity", row)
     def rebate(self, row: dict) -> None: self._ins("rebates", row)
+    def order(self, row: dict) -> None: self._ins("orders", row)
+    def account(self, row: dict) -> None: self._ins("account", row)
     def event(self, ts: float, kind: str, detail: str) -> None: self._ins("events", {"ts": ts, "kind": kind, "detail": detail})
 
     def commit(self) -> None:

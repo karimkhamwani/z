@@ -8,7 +8,7 @@ It's built from what the two wallet teardowns showed (see `../POLYMARKET_BTC5M_B
 - Markets settle on **Chainlink 60-second TWAP at the end ≥ TWAP at the start**. This rule matched 97.8% of 1,832 official results; spot-vs-spot matched only 87%. The fair-value model prices this exactly, including how the outcome locks in during the last minute.
 - The volatility input was calibrated on those 1,832 results. Chainlink prints are smoothed, so the bot measures volatility from **30-second changes**; 1-second changes understate it by about 2×.
 
-> General software, not financial advice. Paper results can be better than live results (see *Paper vs. live*). Only mode `paper` exists; live execution is intentionally not implemented (`bot/live.py`).
+> General software, not financial advice. Paper results can be better than live results (see *Paper vs. live*). Live mode trades real money. Read **Live trading** below before turning it on, and make sure you're allowed to use Polymarket where you live: the international exchange blocks some jurisdictions, including the US.
 
 ---
 
@@ -48,6 +48,78 @@ python manage.py setup
 - **Clock.** Keep automatic time sync on (Windows: *Settings → Time & language → Set time automatically*). The bot compares Chainlink timestamps with your clock, and a drift of a second or more degrades its price estimate.
 - **Sleep.** Stop the machine sleeping while the bot runs. A sleeping machine drops the websocket feeds; the watchdogs reconnect after wake-up, but those windows are missed.
 - **Line endings** are pinned by `.gitattributes` (`.bat` = CRLF, everything else LF), so a clone on any OS runs as-is.
+
+---
+
+## Live trading
+
+The bot has three modes, set by `mode` in `config.toml`:
+
+| Mode | Account | Orders | Ledger |
+|---|---|---|---|
+| `paper` | simulated ($`starting_equity`) | simulated fills | `data/` |
+| `shadow` | **your real account** (balance, positions) | **not sent**; logged as "would send" | `data_live/` |
+| `live` | **your real account** | **real FAK orders** | `data_live/` |
+
+Live uses the same strategy, signals and limits as paper. Only execution and accounting change:
+- **Equity = your portfolio balance:** pUSD cash plus the current value of all positions, read from Polymarket every `sync_every_s` (15 s). Sizing, the $30-per-market cap and both stops use it. The daily stop's "starting capital" is the balance at the first live start (`--fresh` re-reads it).
+- **Orders:** fill-and-kill market BUYs through the official SDK (`polymarket-client`): `amount` = 5 shares × price cap, `max_price` = the cap, `max_spend` = amount + taker fee. Nothing rests on the book. A fill below the cap buys slightly more than 5 shares for the same dollars, never more money.
+- **Winnings** are claimed automatically once a market resolves (`redeem_positions`). Proxy/Safe/deposit wallets need a Relayer API key for this (gasless); EOAs claim on-chain and need a little POL for gas.
+
+### 1. Credentials
+Copy `.env.example` to `.env` in `updown_bot/` (git-ignored; on macOS/Linux run `chmod 600 .env`) and fill in:
+
+```
+POLY_PRIVATE_KEY=0x…            # signer key (the wallet that signs orders)
+POLY_FUNDER_ADDRESS=0x…         # Polymarket wallet that holds the pUSD (profile menu). Optional for type 0
+POLY_SIGNATURE_TYPE=1           # 0 = EOA, 1 = proxy wallet, 2 = Safe, 3 = deposit wallet
+POLY_RELAYER_API_KEY=…          # optional: automatic, gasless claiming (Settings → API Keys → Relayer)
+POLY_RELAYER_API_KEY_ADDRESS=0x…
+```
+
+The SDK detects the wallet type itself. The bot refuses to trade if it doesn't match `POLY_SIGNATURE_TYPE`, or if the resolved wallet isn't `POLY_FUNDER_ADDRESS`. Keys are read only from `.env` or environment variables and are never logged. Prefer a dedicated signer holding nothing else. Accounts created since May 2026 (deposit wallets) can use a scoped, revocable **Session Key**, so your owner key never touches the bot.
+
+### 2. Check the account (no orders)
+
+```bash
+python manage.py preflight
+```
+
+It prints the wallet and type, pUSD cash (with the raw on-chain value), positions, the equity the bot will use, whether claiming is automatic, and your limits.
+
+### 3. Shadow run (real account, no orders)
+Set `mode = "shadow"`, then run `python manage.py run` and `python manage.py dashboard --live`. The amber **SHADOW** badge shows; the Orders panel lists what it would have sent. Watch a few hours.
+
+### 4. Go live
+Set `mode = "live"`, then:
+
+```bash
+python manage.py run --live
+```
+
+It prints the wallet, balance and limits and asks you to type **LIVE**. The dashboard (`python manage.py dashboard --live`) shows a red **LIVE · REAL MONEY** badge, the account strip (cash, positions, last sync, claiming, kill switch), and the **Orders** panel with every order and the exchange's answer.
+
+### Safety controls
+| Control | What it does |
+|---|---|
+| Kill switch | create a file named `STOP` in `data_live/` → no new orders at once; delete it to resume |
+| Two-key start | `mode = "live"` **and** `--live` **and** typing LIVE (`--yes` skips the prompt, e.g. under a service manager) |
+| Stale balance | no orders if the balance hasn't synced for 3 × `sync_every_s` |
+| Low cash | no orders while pUSD cash < `min_cash_usd` ($5) |
+| Rejections | "not enough balance/allowance" halts at once; `max_consecutive_errors` (5) other errors in a row halts |
+| Unknown outcome | if an order request times out or errors, the bot checks the account's recent trades before assuming no fill |
+| Matching delay | markets with `seconds_delay > 0` are never traded |
+| Rate limit | at most `max_orders_per_minute` (20) |
+| Resting orders | `cancel_all_on_start` cancels open orders at start and shutdown, **including ones you placed by hand** (set it to false if you trade manually on the same account) |
+| Existing limits | 5 shares/order, $30/market incl. fees, daily stop 50% of starting capital, 35% drawdown halt |
+
+Live halts are sticky until you restart. The reason is shown on the dashboard and in `data_live/bot.log` (rotated, 5 × 5 MB).
+
+### Run it unattended
+Use `python manage.py run --live --yes` under a service manager that restarts it: Task Scheduler or NSSM on Windows, `launchd` on macOS, `systemd` on Linux. On restart it resumes its state and cancels stray orders.
+
+### Before real money: know the gap
+Paper assumed 300 ms latency and 50% of displayed size. Live competes with faster bots, so start with the small caps you've set and compare the Orders panel (fill rate, latency) and fills with your paper results before raising any limit. The bot's per-fill fee is an estimate from the published formula; the balance sync always reflects the real cash.
 
 ---
 
@@ -106,7 +178,10 @@ bot/feeds.py      Coinbase + Chainlink   bot/book.py     CLOB order books
 bot/markets.py    discovery, resolution  bot/paper.py    fills, portfolio, settlement, rebates
 bot/risk.py       sizing, stops          bot/engine.py   orchestration, status.json
 bot/ledger.py     SQLite ledger          bot/analytics.py shared performance maths
-bot/live.py       (not implemented)      tests/          16 unit tests incl. Monte-Carlo check of the TWAP model
+bot/live.py       live + shadow execution, account sync, claiming (official polymarket-client SDK)
+bot/secrets.py    .env / environment credentials, validation, masking
+.env.example      template for live credentials (copy to .env, never commit)
+tests/            41 tests: model (incl. Monte-Carlo TWAP check), paper engine, risk, live execution vs a fake SDK
 data/             paper.db, portfolio.json, status.json (created at runtime)
 ```
 

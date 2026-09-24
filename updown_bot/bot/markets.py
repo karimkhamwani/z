@@ -25,6 +25,7 @@ class Market:
     min_size: float
     fee_rate: float
     twap_lookback: int
+    seconds_delay: float = 0.0   # >0 means the exchange delays matching; the momentum edge doesn't survive that
 
     def token(self, outcome: str) -> str:
         return self.up_token if outcome == "Up" else self.down_token
@@ -50,10 +51,16 @@ async def fetch_market(asset: str, timeframe: str, start: int) -> Market | None:
     tok = dict(zip(outcomes, tokens))
     fee = (m.get("feeSchedule") or {}).get("rate", 0.07)
     lookback = int((m.get("cryptoMarketConfig") or {}).get("twapLookbackSeconds") or 60)
+    delay = 0.0
+    try:
+        clob = await get_json(f"https://clob.polymarket.com/markets/{m['conditionId']}")
+        delay = float(clob.get("seconds_delay") or 0)
+    except Exception:
+        delay = 0.0 if m.get("secondsDelay") in (None, 0) else float(m["secondsDelay"])
     return Market(asset=asset, timeframe=timeframe, start=start, end=start + TF_SECONDS[timeframe], slug=slug,
                   condition_id=m["conditionId"], up_token=tok["Up"], down_token=tok["Down"],
                   tick=float(m.get("orderPriceMinTickSize") or 0.01), min_size=float(m.get("orderMinSize") or 5),
-                  fee_rate=float(fee), twap_lookback=lookback)
+                  fee_rate=float(fee), twap_lookback=lookback, seconds_delay=delay)
 
 
 POLYGON_RPC = "https://polygon-bor-rpc.publicnode.com"

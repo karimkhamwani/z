@@ -1,10 +1,12 @@
-"""Orchestrator: market rollover, signal loop, paper execution, settlement, rebates, snapshots, status."""
+"""Orchestrator: market rollover, signal loop, execution (paper / shadow / live), settlement, account sync,
+snapshots, status."""
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
 import time
+from collections import deque
 from dataclasses import asdict
 from pathlib import Path
 
@@ -17,6 +19,7 @@ from .model import fair_value
 from .net import atomic_write_text
 from .paper import PaperExecutor, Portfolio, credit_rebates, rebate_rate, settle, utc_day
 from .risk import RiskManager
+from .secrets import mask
 from .strategy import evaluate
 
 log = logging.getLogger("engine")
@@ -25,8 +28,10 @@ MAX_CHAINLINK_AGE_S = 10
 
 
 class Engine:
-    def __init__(self, cfg: Config, fresh: bool = False, run_seconds: float | None = None):
+    def __init__(self, cfg: Config, fresh: bool = False, run_seconds: float | None = None, account=None):
         self.cfg = cfg
+        self.mode = cfg.mode                          # paper | shadow | live
+        self.account = account                        # LiveAccount for shadow/live, None for paper
         self.run_seconds = run_seconds
         self.data = Path(cfg.logging.data_dir)
         self.data.mkdir(parents=True, exist_ok=True)
@@ -37,14 +42,26 @@ class Engine:
         else:
             e = cfg.account.starting_equity
             self.pf = Portfolio(cash=e, starting_equity=e, peak_equity=e)
+        # live/shadow: starting capital = the real portfolio balance at the first sync (set in account_loop)
+        self.needs_initial_equity = self.mode != "paper" and (fresh or not self.state_path.exists())
         self.ledger = Ledger(self.data / "paper.db")
         self.status: dict[str, str] = {"coinbase": "off", "chainlink": "connecting", "clob": "connecting"}
         self.prices = {a: AssetPrices(a, cfg.model.vol_halflife_s, cfg.model.vol_floor_bp, cfg.model.vol_change_s,
                                   cfg.model.vol_prior_bp) for a in cfg.markets.assets}
         self.books = BookFeed(self.status)
         self.risk = RiskManager(cfg.risk, self.pf)
-        self.exec = PaperExecutor(self.pf, cfg.execution.latency_ms, cfg.execution.liquidity_haircut,
-                                  cfg.execution.fee_rate, cfg.risk.min_shares)
+        if self.mode == "paper":
+            self.exec = PaperExecutor(self.pf, cfg.execution.latency_ms, cfg.execution.liquidity_haircut,
+                                      cfg.execution.fee_rate, cfg.risk.min_shares)
+        elif self.mode == "shadow":
+            from .live import ShadowExecutor
+            self.exec = ShadowExecutor(self.ledger)
+        else:
+            from .live import LiveExecutor
+            self.exec = LiveExecutor(account, self.pf, self.ledger, order_timeout_s=cfg.live.order_timeout_s,
+                                     max_consecutive_errors=cfg.live.max_consecutive_errors, kill_switch=self.kill_switch)
+        self.order_times: deque[float] = deque()      # for the orders-per-minute limit
+        self.account_info: dict = {}
         self.markets: dict[str, Market] = {}          # slug -> market (current + next per asset)
         self.refs: dict[str, float] = {}              # slug -> TWAP reference at start
         self.inflight: set[tuple[str, str]] = set()   # (slug, outcome) orders being executed
@@ -122,10 +139,12 @@ class Engine:
         while True:
             await asyncio.sleep(0.1)
             now = time.time()
-            if self.risk.check_breakers():
+            if self.risk.check_breakers() or self._live_blocked(now):
                 continue
             for m in list(self.markets.values()):
                 if not (m.start <= now < m.end):
+                    continue
+                if m.seconds_delay > 0:   # delayed matching: a 3-second momentum edge can't survive it
                     continue
                 fv = self._fair(m, now)
                 if fv is None:
@@ -155,6 +174,12 @@ class Engine:
                 shares = self.risk.clip_shares(m.condition_id, intent.limit, m.min_size, m.fee_rate)
                 if shares <= 0:
                     continue
+                if self.mode != "paper":
+                    while self.order_times and now - self.order_times[0] > 60:
+                        self.order_times.popleft()
+                    if len(self.order_times) >= self.cfg.live.max_orders_per_minute:
+                        continue
+                    self.order_times.append(now)
                 reserve = shares * (intent.limit + m.fee_rate * intent.limit * (1 - intent.limit))
                 self.risk.reserve(m.condition_id, reserve)
                 self.stats["signals"] += 1
@@ -171,7 +196,7 @@ class Engine:
                                        get_book=self.books.book, context=ctx)
             if fill:
                 self.stats["fills"] += 1
-                self.ledger.fill({**asdict(fill), "mode": "paper"})
+                self.ledger.fill({**asdict(fill), "mode": self.mode})
                 log.info("FILL %s %s %.2f sh @ %.3f (fair %.3f, edge %+.3f, mom %+.2fbp, %ds left) cash %.2f",
                          m.slug, fill.outcome, fill.shares, fill.avg_price, fill.fair, fill.edge, fill.momentum_bp,
                          fill.seconds_left, fill.cash)
@@ -180,6 +205,14 @@ class Engine:
                                        "reason": "no_fill_after_latency", "fair": intent.fair, "ask": intent.ask,
                                        "edge": intent.edge, "momentum_bp": intent.momentum_bp,
                                        "seconds_left": m.end - time.time()})
+        except Exception as e:
+            from .live import HaltTrading
+            if isinstance(e, HaltTrading):
+                self.pf.halted = f"live halt: {e}"
+                self.ledger.event(time.time(), "halt", str(e))
+                log.error("HALTED — no new orders until restart: %s", e)
+            else:
+                log.exception("unexpected execution error on %s", m.slug)
         finally:
             self.inflight.discard(key)
             self.risk.release(m.condition_id, reserve)
@@ -198,7 +231,7 @@ class Engine:
                     winner, source = info["model_winner"], "model_twap_fallback"
                 if winner is None:
                     continue
-                res = settle(self.pf, cid, winner)
+                res = settle(self.pf, cid, winner, credit_cash=self.mode == "paper")
                 del self.pending[cid]
                 if res:
                     self.stats["settled"] += 1
@@ -206,7 +239,7 @@ class Engine:
                                             "equity_after": self.pf.equity})
                     log.info("SETTLED %s winner=%s (model %s) pnl %+.2f → equity %.2f", res["slug"], winner,
                              info.get("model_winner"), res["pnl"], self.pf.equity)
-            reb = credit_rebates(self.pf, now, self.cfg.rebates.estimate_taker_rebates)
+            reb = credit_rebates(self.pf, now, self.cfg.rebates.estimate_taker_rebates and self.mode == "paper")
             if reb:
                 self.ledger.rebate(reb)
                 log.info("REBATE %s: %.2f (tier %.0f%% on fees %.2f)", reb["day"], reb["rebate"], reb["rate"] * 100, reb["fees"])
@@ -214,6 +247,57 @@ class Engine:
                 self.ledger.event(now, "new_day", f"equity {self.pf.equity:.2f}")
             self.pf.save(self.state_path)
             self.ledger.commit()
+
+    # ---------- live account ----------
+    def kill_switch(self) -> bool:
+        """Create a file named STOP in the data folder to stop opening positions immediately."""
+        return (self.data / "STOP").exists()
+
+    def _live_blocked(self, now: float) -> bool:
+        if self.mode == "paper":
+            return False
+        if self.kill_switch():
+            return True
+        if now - self.pf.last_sync > 3 * self.cfg.live.sync_every_s:   # never trade on a stale balance
+            return True
+        return self.pf.cash < self.cfg.live.min_cash_usd
+
+    async def account_loop(self) -> None:
+        failures = 0
+        while True:
+            try:
+                snap = await self.account.snapshot()
+                failures = 0
+                self.pf.cash = snap.cash
+                self.pf.positions_value = snap.positions_value
+                self.pf.last_sync = snap.ts
+                if self.needs_initial_equity:
+                    eq = self.pf.equity
+                    self.pf.starting_equity = self.pf.peak_equity = self.pf.day_start_equity = eq
+                    self.needs_initial_equity = False
+                    log.info("starting capital set from portfolio balance: %.2f (cash %.2f + positions %.2f)",
+                             eq, snap.cash, snap.positions_value)
+                self.pf.peak_equity = max(self.pf.peak_equity, self.pf.equity)
+                self.account_info = {"cash": snap.cash, "positions_value": snap.positions_value,
+                                     "open_positions": snap.open_positions, "redeemable": len(snap.redeemable),
+                                     "last_sync": snap.ts, "error": ""}
+                self.ledger.account({"ts": snap.ts, "cash": snap.cash, "positions_value": snap.positions_value,
+                                     "equity": self.pf.equity, "open_positions": snap.open_positions,
+                                     "redeemable": len(snap.redeemable), "raw_balance": snap.raw_balance})
+                if self.mode == "live" and self.cfg.live.redeem_winnings and self.account.creds.can_redeem:
+                    for cid in snap.redeemable:
+                        try:
+                            tx = await self.account.redeem(cid)
+                            if tx:
+                                log.info("CLAIMED winnings for %s… (tx %s)", cid[:10], tx)
+                                self.ledger.event(time.time(), "redeem", f"{cid} {tx}")
+                        except Exception as e:
+                            log.warning("claiming %s… failed (will retry): %s", cid[:10], e)
+            except Exception as e:
+                failures += 1
+                self.account_info["error"] = f"{type(e).__name__}: {e}"[:200]
+                log.warning("account sync failed (%d in a row): %s", failures, e)
+            await asyncio.sleep(self.cfg.live.sync_every_s)
 
     # ---------- recording & status ----------
     async def snapshot_loop(self) -> None:
@@ -269,9 +353,16 @@ class Engine:
                 "momentum_bp": p.momentum_bp(self.cfg.strategy.momentum_window_s, now),
                 "position": {"up_shares": pos.up_shares, "down_shares": pos.down_shares, "cost": pos.cost,
                              "orders": pos.orders} if pos else None})
-        st = {"ts": now, "mode": self.cfg.mode, "started": self.started, "feeds": dict(self.status),
+        live = None
+        if self.mode != "paper" and self.account is not None:
+            live = {"wallet": mask(self.account.wallet), "wallet_type": self.account.wallet_type,
+                    "kill_switch": self.kill_switch(), "sync_age_s": now - self.pf.last_sync if self.pf.last_sync else None,
+                    "can_redeem": bool(self.account.creds.can_redeem and self.cfg.live.redeem_winnings),
+                    "min_cash_usd": self.cfg.live.min_cash_usd, **self.account_info}
+        st = {"ts": now, "mode": self.cfg.mode, "live": live, "started": self.started, "feeds": dict(self.status),
               "halted": pf.halted, "stats": dict(self.stats), "pending_settlement": len(self.pending),
               "portfolio": {"equity": pf.equity, "cash": pf.cash, "open_cost": pf.open_cost, "peak": pf.peak_equity,
+                            "positions_value": pf.positions_value,
                             "starting_equity": pf.starting_equity, "realized": pf.realized_pnl,
                             "rebates": pf.rebates_total, "fees_today": pf.fees_by_day.get(today, 0.0),
                             "wv_30d": pf.wv_30d(today), "tier": rebate_rate(pf.wv_30d(today)),
@@ -315,11 +406,17 @@ class Engine:
                      f" | HALTED: {pf.halted}" if pf.halted else "")
 
     async def run(self) -> None:
+        if self.account is not None:
+            if self.mode == "live" and self.cfg.live.cancel_all_on_start:
+                await self.account.cancel_all()
+                log.info("cancelled any resting orders")
         self.risk.roll_day(time.time())
         coros = [run_chainlink(self.prices, self.status), self.books.run(), self.market_loop(), self.signal_loop(),
                  self.settle_loop(), self.snapshot_loop(), self.status_loop()]
         if self.cfg.feeds.coinbase:
             coros.append(run_coinbase(self.prices, self.status))
+        if self.account is not None:
+            coros.append(self.account_loop())
         tasks = [asyncio.create_task(c) for c in coros]
         try:
             # run until a task crashes (re-raised below) or, with --minutes, until the time is up
@@ -332,5 +429,12 @@ class Engine:
             for t in tasks:
                 t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+            if self.account is not None:
+                try:
+                    if self.mode == "live" and self.cfg.live.cancel_all_on_start:
+                        await self.account.cancel_all()
+                    await self.account.close()
+                except Exception as e:
+                    log.warning("shutdown: %s", e)
             self.pf.save(self.state_path)
             self.ledger.commit()
