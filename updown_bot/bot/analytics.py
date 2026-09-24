@@ -114,3 +114,69 @@ def market_snapshots(data: Path, slug: str, limit: int = 400) -> list[dict]:
     rows = db.execute("SELECT ts, seconds_left, reference, x_now, chainlink, spot, p_up, up_bid, up_ask, down_bid, "
                       "down_ask, momentum_bp FROM snapshots WHERE slug=? ORDER BY ts DESC LIMIT ?", (slug, limit))
     return [dict(r) for r in rows][::-1]
+
+
+# ---------- paginated tables (all rows, filtered server-side) ----------
+FILL_SQL = """
+SELECT f.ts, f.slug, f.condition_id, f.outcome, f.shares, f.avg_price, f.notional, f.fee, f.cash, f.fair, f.edge,
+       f.momentum_bp, f.seconds_left, f.signal_ask, s.winner,
+       CASE WHEN s.winner IS NULL THEN NULL
+            WHEN s.winner = 'Split' THEN 0.5 * f.shares - f.cash
+            WHEN s.winner = f.outcome THEN f.shares - f.cash ELSE -f.cash END AS pnl
+FROM fills f LEFT JOIN settlements s ON s.condition_id = f.condition_id
+"""
+
+
+def _fill_where(result: str, side: str) -> tuple[str, list]:
+    conds, args = [], []
+    if result == "open":
+        conds.append("s.winner IS NULL")
+    elif result == "won":
+        conds.append("s.winner IS NOT NULL AND (s.winner = f.outcome OR s.winner = 'Split')")
+    elif result == "lost":
+        conds.append("s.winner IS NOT NULL AND s.winner <> f.outcome AND s.winner <> 'Split'")
+    if side in ("Up", "Down"):
+        conds.append("f.outcome = ?")
+        args.append(side)
+    return (" WHERE " + " AND ".join(conds)) if conds else "", args
+
+
+def fills_page(data: Path, offset: int = 0, limit: int = 50, result: str = "all", side: str = "all") -> dict:
+    """Newest-first page of fills with each fill's settlement result, plus totals for the filtered set."""
+    db = connect(Path(data))
+    if db is None:
+        return {"total": 0, "rows": [], "totals": {}}
+    where, args = _fill_where(result, side)
+    tot = db.execute(f"SELECT COUNT(*) n, COALESCE(SUM(notional),0) notional, COALESCE(SUM(fee),0) fees, "
+                     f"COALESCE(SUM(pnl),0) pnl, SUM(pnl IS NOT NULL) settled, SUM(pnl > 0) won "
+                     f"FROM ({FILL_SQL}{where})", args).fetchone()
+    rows = db.execute(f"{FILL_SQL}{where} ORDER BY f.ts DESC LIMIT ? OFFSET ?", [*args, limit, offset]).fetchall()
+    return {"total": tot["n"], "offset": offset, "limit": limit, "rows": [dict(r) for r in rows],
+            "totals": {"notional": tot["notional"], "fees": tot["fees"], "pnl": tot["pnl"],
+                       "settled": tot["settled"] or 0, "won": tot["won"] or 0}}
+
+
+def settlements_page(data: Path, offset: int = 0, limit: int = 50, result: str = "all") -> dict:
+    db = connect(Path(data))
+    if db is None:
+        return {"total": 0, "rows": []}
+    where = {"won": " WHERE pnl > 0", "lost": " WHERE pnl <= 0"}.get(result, "")
+    n = db.execute(f"SELECT COUNT(*) FROM settlements{where}").fetchone()[0]
+    rows = db.execute(f"SELECT * FROM settlements{where} ORDER BY ts DESC LIMIT ? OFFSET ?", (limit, offset)).fetchall()
+    return {"total": n, "offset": offset, "limit": limit, "rows": [dict(r) for r in rows]}
+
+
+def fills_csv(data: Path) -> str:
+    import csv
+    import io
+    db = connect(Path(data))
+    buf = io.StringIO()
+    if db is None:
+        return ""
+    cur = db.execute(f"{FILL_SQL} ORDER BY f.ts")
+    w = csv.writer(buf)
+    cols = [d[0] for d in cur.description]
+    w.writerow(["utc_time", *cols])
+    for r in cur:
+        w.writerow([dt.datetime.fromtimestamp(r["ts"], dt.UTC).strftime("%Y-%m-%d %H:%M:%S"), *r])
+    return buf.getvalue()

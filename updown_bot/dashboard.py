@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from bot.analytics import load, market_snapshots
+from bot.analytics import fills_csv, fills_page, load, market_snapshots, settlements_page
 
 HERE = Path(__file__).parent
 PAGE = HERE / "dashboard" / "index.html"
@@ -63,6 +63,23 @@ def make_handler(data: Path):
                         self._json({"missing": True})
                 elif u.path == "/api/perf":
                     self._json(perf_cache.get(lambda: load(data)))
+                elif u.path == "/api/fills":
+                    q = parse_qs(u.query)
+                    self._json(fills_page(data, offset=max(0, int(q.get("offset", ["0"])[0])),
+                                          limit=min(500, max(1, int(q.get("limit", ["50"])[0]))),
+                                          result=q.get("result", ["all"])[0], side=q.get("side", ["all"])[0]))
+                elif u.path == "/api/settlements":
+                    q = parse_qs(u.query)
+                    self._json(settlements_page(data, offset=max(0, int(q.get("offset", ["0"])[0])),
+                                                limit=min(500, max(1, int(q.get("limit", ["50"])[0]))),
+                                                result=q.get("result", ["all"])[0]))
+                elif u.path == "/fills.csv":
+                    body = fills_csv(data).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/csv; charset=utf-8")
+                    self.send_header("Content-Disposition", f'attachment; filename="paper_fills_{time.strftime("%Y%m%d_%H%M")}.csv"')
+                    self.end_headers()
+                    self.wfile.write(body)
                 elif u.path == "/api/market":
                     slug = parse_qs(u.query).get("slug", [""])[0]
                     self._json(market_snapshots(data, slug))

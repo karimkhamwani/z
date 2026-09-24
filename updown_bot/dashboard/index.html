@@ -90,6 +90,17 @@ td.n,th.n{text-align:right}
 .muted{color:var(--ink-3)}
 .empty{color:var(--ink-3);font-size:13px;padding:10px 0}
 .foot{font-size:12px;color:var(--ink-3)}
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.seg{display:inline-flex;border:1px solid var(--rule);border-radius:7px;overflow:hidden}
+.seg button{font:12px var(--sans);border:0;border-right:1px solid var(--rule);background:var(--panel-2);color:var(--ink-2);padding:5px 10px;cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed=true]{background:var(--accent);color:#fff}
+.seg button:focus-visible,.pager button:focus-visible,.dl:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.pager{display:inline-flex;align-items:center;gap:6px;font:12px var(--mono);color:var(--ink-3)}
+.pager button{font:12px var(--sans);border:1px solid var(--rule);background:var(--panel-2);color:var(--ink-2);padding:5px 10px;border-radius:6px;cursor:pointer}
+.pager button:disabled{opacity:.4;cursor:default}
+.dl{font-size:12px;color:var(--accent);text-decoration:none;border:1px solid var(--rule);padding:5px 10px;border-radius:6px}
+.sumline{font:12px var(--mono);color:var(--ink-2)}
 </style>
 </head>
 <body>
@@ -136,14 +147,32 @@ td.n,th.n{text-align:right}
   </div>
 
   <section class="panel">
-    <div class="ph"><h2>Recent fills</h2><span class="sub">paper taker fills (after simulated latency and liquidity haircut)</span></div>
+    <div class="ph"><h2>All fills</h2><span class="sub">paper taker fills (after simulated latency and liquidity haircut), newest first</span></div>
+    <div class="toolbar">
+      <div class="seg" id="f-result" role="group" aria-label="Filter by result">
+        <button data-v="all" aria-pressed="true">All</button><button data-v="open">Open</button><button data-v="won">Won</button><button data-v="lost">Lost</button>
+      </div>
+      <div class="seg" id="f-side" role="group" aria-label="Filter by side">
+        <button data-v="all" aria-pressed="true">Both sides</button><button data-v="Up">Up</button><button data-v="Down">Down</button>
+      </div>
+      <span class="spacer"></span>
+      <a class="dl" href="/fills.csv">Download all fills (CSV)</a>
+    </div>
+    <div class="sumline" id="f-sum"></div>
     <div class="tw"><table id="fills"></table></div>
+    <div class="toolbar"><span class="spacer"></span><span class="pager" id="f-pager"></span></div>
   </section>
 
   <div class="grid2">
     <section class="panel">
-      <div class="ph"><h2>Settled markets</h2></div>
+      <div class="ph"><h2>Settled markets</h2><span class="sub">newest first</span></div>
+      <div class="toolbar">
+        <div class="seg" id="s-result" role="group" aria-label="Filter settled markets">
+          <button data-v="all" aria-pressed="true">All</button><button data-v="won">Won</button><button data-v="lost">Lost</button>
+        </div>
+      </div>
       <div class="tw"><table id="settled"></table></div>
+      <div class="toolbar"><span class="spacer"></span><span class="pager" id="s-pager"></span></div>
     </section>
     <section class="panel">
       <div class="ph"><h2>Skipped signals</h2><span class="sub">momentum passed, trade rejected</span></div>
@@ -338,30 +367,79 @@ function renderPerf() {
     {h: "net P&L", n: 1, f: r => sgn(r.pnl), cls: r => cls(r.pnl)}, {h: "% of notional", n: 1, f: r => r.pnl_pct == null ? "—" : r.pnl_pct.toFixed(2) + "%", cls: r => cls(r.pnl_pct)},
     {h: "win rate", n: 1, f: r => pct(r.win_rate)}, {h: "avg model fair", n: 1, f: r => f3(r.avg_fair)}
   ], perf.tables[tab].rows.filter(r => r.fills), "No settled fills yet."));
-  safe("fills", () => table("fills", [
-    {h: "time", f: r => hhmmss(r.ts)}, {h: "market", f: r => r.slug.replace("-updown-", " ").replace(/-(\d+)$/, (m, t) => " " + hhmmss(+t).slice(0, 5))},
-    {h: "side", f: r => outcomeChip(r.outcome)}, {h: "shares", n: 1, f: r => r.shares.toFixed(2)}, {h: "avg px", n: 1, f: r => f3(r.avg_price)},
-    {h: "cash", n: 1, f: r => usd(r.cash)}, {h: "fee", n: 1, f: r => usd(r.fee)}, {h: "fair", n: 1, f: r => f3(r.fair)},
-    {h: "edge", n: 1, f: r => (r.edge * 100).toFixed(1) + "¢", cls: r => cls(r.edge)}, {h: "mom", n: 1, f: r => r.momentum_bp.toFixed(2) + "bp"},
-    {h: "left", n: 1, f: r => Math.round(r.seconds_left) + "s"},
-    {h: "result", n: 1, f: r => r.won == null ? '<span class="muted">open</span>' : sgn(r.pnl), cls: r => r.won == null ? "" : cls(r.pnl)}
-  ], perf.recent_fills, "No fills yet. The bot only trades when momentum and edge line up — this can take a while."));
-  safe("settled", () => table("settled", [
-    {h: "time", f: r => hhmmss(r.ts)}, {h: "market", f: r => r.slug.replace("-updown-", " ")}, {h: "winner", f: r => outcomeChip(r.winner)},
-    {h: "model", f: r => r.model_winner ? (r.model_winner === r.winner ? "✓" : "✗ " + r.model_winner) : "—"},
-    {h: "Up/Down sh", n: 1, f: r => `${r.up_shares.toFixed(1)} / ${r.down_shares.toFixed(1)}`}, {h: "cost", n: 1, f: r => usd(r.cost)},
-    {h: "payout", n: 1, f: r => usd(r.payout)}, {h: "P&L", n: 1, f: r => sgn(r.pnl), cls: r => cls(r.pnl)}, {h: "equity", n: 1, f: r => usd(r.equity_after)}
-  ], perf.recent_settlements, "Nothing settled yet."));
   safe("rejections", () => table("rej", [{h: "reason", f: r => r.reason.replaceAll("_", " ")}, {h: "count", n: 1, f: r => r.n}, {h: "avg edge", n: 1, f: r => r.avg_edge == null ? "—" : (r.avg_edge * 100).toFixed(1) + "¢"}], perf.rejections, "None yet."));
   safe("daily", () => table("daily", [{h: "day", f: r => r.day}, {h: "fills", n: 1, f: r => r.fills}, {h: "notional", n: 1, f: r => usd(r.notional)}, {h: "fees", n: 1, f: r => usd(r.fees)}, {h: "net P&L", n: 1, f: r => sgn(r.pnl), cls: r => cls(r.pnl)}], perf.daily, "No settled days yet."));
 }
+
+// ---------- paged tables (all fills / all settled markets) ----------
+const PAGE = 50;
+const fState = {offset: 0, result: "all", side: "all"}, sState = {offset: 0, result: "all"};
+const FILL_COLS = [
+  {h: "time", f: r => new Date(r.ts * 1000).toLocaleString([], {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false})},
+  {h: "market", f: r => r.slug.replace("-updown-", " ").replace(/-(\d+)$/, (m, t) => " " + hhmmss(+t).slice(0, 5))},
+  {h: "side", f: r => outcomeChip(r.outcome)}, {h: "shares", n: 1, f: r => r.shares.toFixed(2)}, {h: "avg px", n: 1, f: r => f3(r.avg_price)},
+  {h: "cash", n: 1, f: r => usd(r.cash)}, {h: "fee", n: 1, f: r => usd(r.fee)}, {h: "fair", n: 1, f: r => f3(r.fair)},
+  {h: "edge", n: 1, f: r => (r.edge * 100).toFixed(1) + "¢", cls: r => cls(r.edge)}, {h: "mom", n: 1, f: r => r.momentum_bp.toFixed(2) + "bp"},
+  {h: "left", n: 1, f: r => Math.round(r.seconds_left) + "s"},
+  {h: "winner", f: r => r.winner ? outcomeChip(r.winner) : '<span class="muted">open</span>'},
+  {h: "P&L", n: 1, f: r => r.pnl == null ? '<span class="muted">—</span>' : sgn(r.pnl), cls: r => r.pnl == null ? "" : cls(r.pnl)}
+];
+const SETTLED_COLS = [
+  {h: "time", f: r => new Date(r.ts * 1000).toLocaleString([], {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false})},
+  {h: "market", f: r => r.slug.replace("-updown-", " ")}, {h: "winner", f: r => outcomeChip(r.winner)},
+  {h: "model", f: r => r.model_winner ? (r.model_winner === r.winner ? "✓" : "✗ " + r.model_winner) : "—"},
+  {h: "orders", n: 1, f: r => r.orders},
+  {h: "Up/Down sh", n: 1, f: r => `${r.up_shares.toFixed(1)} / ${r.down_shares.toFixed(1)}`}, {h: "cost", n: 1, f: r => usd(r.cost)},
+  {h: "payout", n: 1, f: r => usd(r.payout)}, {h: "P&L", n: 1, f: r => sgn(r.pnl), cls: r => cls(r.pnl)}, {h: "equity", n: 1, f: r => usd(r.equity_after)}
+];
+function pager(id, st, total, reload) {
+  const el = $(id);
+  const from = total ? st.offset + 1 : 0, to = Math.min(st.offset + PAGE, total);
+  const pages = Math.max(1, Math.ceil(total / PAGE)), page = Math.floor(st.offset / PAGE) + 1;
+  el.innerHTML = `<button data-a="first" ${st.offset ? "" : "disabled"}>« Newest</button><button data-a="prev" ${st.offset ? "" : "disabled"}>‹ Prev</button>
+    <span>${from}–${to} of ${total} · page ${page}/${pages}</span>
+    <button data-a="next" ${to < total ? "" : "disabled"}>Next ›</button><button data-a="last" ${to < total ? "" : "disabled"}>Oldest »</button>`;
+  el.querySelectorAll("button").forEach(b => b.onclick = () => {
+    const a = b.dataset.a;
+    st.offset = a === "first" ? 0 : a === "prev" ? Math.max(0, st.offset - PAGE) : a === "next" ? st.offset + PAGE : (pages - 1) * PAGE;
+    reload();
+  });
+}
+function segment(id, st, key, reload) {
+  const el = $(id);
+  el.querySelectorAll("button").forEach(b => b.onclick = () => {
+    st[key] = b.dataset.v; st.offset = 0;
+    el.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b));
+    reload();
+  });
+}
+async function loadFills() {
+  const q = new URLSearchParams({offset: fState.offset, limit: PAGE, result: fState.result, side: fState.side});
+  const d = await (await fetch("/api/fills?" + q)).json();
+  if (fState.offset >= d.total && d.total) { fState.offset = Math.floor((d.total - 1) / PAGE) * PAGE; return loadFills(); }
+  const t = d.totals || {};
+  $("f-sum").innerHTML = d.total ? `${d.total} fills · notional ${usd(t.notional)} · fees ${usd(t.fees)} · settled ${t.settled} (won ${t.won}${t.settled ? `, ${pct(t.won / t.settled)}` : ""}) · net P&L <span class="${cls(t.pnl)}">${sgn(t.pnl)}</span>` : "";
+  table("fills", FILL_COLS, d.rows, fState.result === "all" && fState.side === "all"
+    ? "No fills yet. The bot only trades when momentum and edge line up — this can take a while." : "No fills match this filter.");
+  pager("f-pager", fState, d.total, () => safe("fills", loadFills));
+}
+async function loadSettled() {
+  const q = new URLSearchParams({offset: sState.offset, limit: PAGE, result: sState.result});
+  const d = await (await fetch("/api/settlements?" + q)).json();
+  table("settled", SETTLED_COLS, d.rows, sState.result === "all" ? "Nothing settled yet." : "No markets match this filter.");
+  pager("s-pager", sState, d.total, () => safe("settled", loadSettled));
+}
+segment("f-result", fState, "result", () => safe("fills", loadFills));
+segment("f-side", fState, "side", () => safe("fills", loadFills));
+segment("s-result", sState, "result", () => safe("settled", loadSettled));
 
 // ---------- loops ----------
 async function pollLive() { try { live = await (await fetch("/api/live")).json(); } catch (e) { $("updated").textContent = "dashboard server unreachable"; return; } safe("live", renderLive); }
 async function pollPerf() { try { perf = await (await fetch("/api/perf")).json(); } catch (e) { console.error("dashboard: /api/perf failed", e); return; } safe("perf", renderPerf); safe("equity", renderEquity); }
 async function pollWindow() { try { await renderWindow(); } catch (e) { console.error("dashboard: window chart failed", e); } }
-pollLive(); pollPerf(); setTimeout(pollWindow, 400);
-setInterval(pollLive, 1000); setInterval(pollPerf, 5000); setInterval(pollWindow, 2000);
+async function pollTables() { try { await loadFills(); } catch (e) { console.error("dashboard: fills failed", e); } try { await loadSettled(); } catch (e) { console.error("dashboard: settled failed", e); } }
+pollLive(); pollPerf(); pollTables(); setTimeout(pollWindow, 400);
+setInterval(pollLive, 1000); setInterval(pollPerf, 5000); setInterval(pollWindow, 2000); setInterval(pollTables, 5000);
 </script>
 </body>
 </html>
