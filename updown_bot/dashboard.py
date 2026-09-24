@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlparse
 
 from bot.analytics import fills_csv, fills_page, load, market_snapshots, orders_page, settlements_page
 
-HERE = Path(__file__).parent
+HERE = Path(__file__).resolve().parent
 PAGE = HERE / "dashboard" / "index.html"
 
 
@@ -58,9 +58,10 @@ def make_handler(data: Path):
                     if p.exists():
                         st = json.loads(p.read_text(encoding="utf-8"))
                         st["age_s"] = time.time() - st.get("ts", 0)
+                        st["data_dir"] = str(data.resolve())
                         self._json(st)
                     else:
-                        self._json({"missing": True})
+                        self._json({"missing": True, "data_dir": str(data.resolve())})
                 elif u.path == "/api/perf":
                     self._json(perf_cache.get(lambda: load(data)))
                 elif u.path == "/api/fills":
@@ -95,19 +96,37 @@ def make_handler(data: Path):
     return H
 
 
+def resolve_data_dir(a) -> tuple[Path, str]:
+    """Which ledger to show: --data wins, then --paper / --live, otherwise whatever mode config.toml is set to."""
+    if a.data:
+        return Path(a.data), "--data"
+    if a.live:
+        return HERE / "data_live", "--live"
+    if a.paper:
+        return HERE / "data", "--paper"
+    try:
+        from bot.config import load_config
+        cfg = load_config(a.config)
+        return Path(cfg.logging.data_dir), f'config.toml mode = "{cfg.mode}"'
+    except Exception as e:   # unreadable config: fall back to paper rather than refusing to start
+        print(f"Couldn't read {a.config} ({e}); showing paper data")
+        return HERE / "data", "fallback"
+
+
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default=str(Path(__file__).resolve().parent / "data"))
+    ap = argparse.ArgumentParser(description="Local dashboard. By default it shows the ledger for the mode set in config.toml.")
+    ap.add_argument("--data", default=None, help="explicit data folder to show")
+    ap.add_argument("--live", action="store_true", help="show data_live/ (shadow + live) regardless of config.toml")
+    ap.add_argument("--paper", action="store_true", help="show data/ (paper) regardless of config.toml")
+    ap.add_argument("--config", default=str(HERE / "config.toml"))
     ap.add_argument("--port", type=int, default=8766)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--no-browser", action="store_true", help="don't open the dashboard in a browser")
-    ap.add_argument("--live", action="store_true", help="show the live/shadow ledger (data_live/) instead of paper")
     a = ap.parse_args()
-    if a.live:
-        a.data = str(Path(__file__).resolve().parent / "data_live")
-    srv = ThreadingHTTPServer((a.host, a.port), make_handler(Path(a.data)))
+    data, why = resolve_data_dir(a)
+    srv = ThreadingHTTPServer((a.host, a.port), make_handler(data))
     url = f"http://{a.host}:{a.port}"
-    print(f"Dashboard: {url}   (data: {Path(a.data).resolve()})   Ctrl+C to stop")
+    print(f"Dashboard: {url}\n  showing: {data.resolve()}  ({why})\n  Ctrl+C to stop")
     if not a.no_browser:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     try:

@@ -7,7 +7,8 @@
     python manage.py test
     python manage.py preflight             live account check: keys, wallet type, balance, positions (no orders)
     python manage.py run --live            real-money trading (also needs mode = "live" in config.toml)
-    python manage.py dashboard --live      dashboard for the live/shadow ledger (data_live/)
+    python manage.py dashboard             follows config.toml's mode (paper → data/, shadow/live → data_live/)
+    python manage.py dashboard --paper     force the paper ledger  (--live forces data_live/)
     python manage.py certs                 macOS only: trust the keychain's roots (networks that inspect TLS)
 
 On Windows use `py -3 manage.py ...` if `python` isn't on PATH. Any command sets up .venv first if it's missing.

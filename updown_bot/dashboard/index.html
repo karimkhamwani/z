@@ -221,9 +221,13 @@ function feedPill(name, st) {
   return `<span class="pill"><span class="dot ${ok ? "ok" : off ? "" : "bad"}"></span>${name} ${ok ? "" : `<span class="muted">${st || "?"}</span>`}</span>`;
 }
 function renderLive() {
-  if (!live || live.missing) { $("updated").textContent = "no status.json yet — start the bot"; return; }
+  if (!live || live.missing) {
+    $("updated").textContent = `no data yet in ${live && live.data_dir ? live.data_dir.split(/[\\/]/).slice(-2).join("/") : "this folder"} — start the bot in this mode`;
+    return;
+  }
   const age = live.age_s;
-  $("updated").textContent = age < 5 ? `live · ${hhmmss(live.ts)}` : `stale ${Math.round(age)}s — is the bot running?`;
+  const folder = (live.data_dir || "").split(/[\\/]/).pop();
+  $("updated").textContent = (age < 5 ? `live · ${hhmmss(live.ts)}` : `stale ${Math.round(age)}s — is the bot running in this mode?`) + (folder ? ` · ${folder}/` : "");
   $("updated").style.color = age < 5 ? "" : "var(--down)";
   const mode = live.mode || "paper";
   $("mode").textContent = mode === "live" ? "LIVE · REAL MONEY" : mode.toUpperCase();
