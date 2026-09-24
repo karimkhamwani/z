@@ -104,7 +104,7 @@ def _build(cls, data: dict):
 
 
 def load_config(path: str | Path) -> Config:
-    raw = tomllib.loads(Path(path).read_text())
+    raw = tomllib.loads(Path(path).read_text(encoding="utf-8"))
     cfg = Config(mode=raw.pop("mode", "paper"))
     sections = {"account": Account, "markets": Markets, "feeds": Feeds, "model": Model, "strategy": Strategy,
                 "execution": Execution, "risk": Risk, "rebates": Rebates, "logging": Logging}

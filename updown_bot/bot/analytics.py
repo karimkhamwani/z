@@ -45,7 +45,10 @@ def bucket_table(rows: list[dict], key: str) -> list[dict]:
 
 def load(data: Path, recent: int = 30) -> dict:
     data = Path(data)
-    pf = json.loads((data / "portfolio.json").read_text()) if (data / "portfolio.json").exists() else {}
+    try:
+        pf = json.loads((data / "portfolio.json").read_text(encoding="utf-8")) if (data / "portfolio.json").exists() else {}
+    except (OSError, ValueError):   # file being replaced right now — try again on the next poll
+        pf = {}
     db = connect(data)
     if db is None:
         return {"portfolio": pf, "empty": True}

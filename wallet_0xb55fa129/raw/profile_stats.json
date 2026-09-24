@@ -1,0 +1,36 @@
+{
+ "value": [
+  {
+   "user": "0xb55fa1296e6ec55d0ce53d93b9237389f11764d4",
+   "value": 9340.5887
+  }
+ ],
+ "traded": {
+  "user": "0xb55fa1296e6ec55d0ce53d93b9237389f11764d4",
+  "traded": 149941
+ },
+ "leaderboard_all": [
+  {
+   "rank": "1852",
+   "proxyWallet": "0xb55fa1296e6ec55d0ce53d93b9237389f11764d4",
+   "userName": "0xb55fa1296E6ec55D0cE53d93B9237389f11764d4-1777575277609",
+   "xUsername": "",
+   "verifiedBadge": false,
+   "vol": 125830430.09369841,
+   "pnl": 100787.875134,
+   "profileImage": ""
+  }
+ ],
+ "leaderboard_week": [
+  {
+   "rank": "545909",
+   "proxyWallet": "0xb55fa1296e6ec55d0ce53d93b9237389f11764d4",
+   "userName": "0xb55fa1296E6ec55D0cE53d93B9237389f11764d4-1777575277609",
+   "xUsername": "",
+   "verifiedBadge": false,
+   "vol": 5982207.296165002,
+   "pnl": -298477.4906202417,
+   "profileImage": ""
+  }
+ ]
+}

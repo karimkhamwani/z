@@ -21,6 +21,11 @@ def main() -> None:
     ap.add_argument("--minutes", type=float, default=None, help="stop after this many minutes")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
+    for stream in (sys.stdout, sys.stderr):   # Windows consoles default to cp1252; never crash on "→" or "¢"
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     cfg = load_config(args.config)
     if cfg.mode != "paper":
         sys.exit("Only mode = \"paper\" is supported. Live execution is not implemented (see bot/live.py).")

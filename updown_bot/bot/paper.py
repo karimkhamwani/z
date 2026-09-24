@@ -100,9 +100,8 @@ class Portfolio:
         return cls(**d)
 
     def save(self, path: Path) -> None:
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(self.to_json())
-        tmp.replace(path)
+        from .net import atomic_write_text
+        atomic_write_text(path, self.to_json())
 
 
 def simulate_taker_fill(book_asks: list[tuple[float, float]], *, limit: float, max_shares: float, haircut: float,

@@ -55,7 +55,7 @@ def make_handler(data: Path):
                 elif u.path == "/api/live":
                     p = data / "status.json"
                     if p.exists():
-                        st = json.loads(p.read_text())
+                        st = json.loads(p.read_text(encoding="utf-8"))
                         st["age_s"] = time.time() - st.get("ts", 0)
                         self._json(st)
                     else:

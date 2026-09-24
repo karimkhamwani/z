@@ -47,7 +47,37 @@ Run the tests:
 - `--minutes N` stops the bot automatically after N minutes.
 - **After startup the bot sits out the current window.** It needs Chainlink prints from the 60 seconds before a window opens to know the start price, so it starts trading at the next window boundary (at most 5 minutes). The dashboard says so.
 
-**Corporate networks:** if Coinbase or Polymarket connections fail with `CERTIFICATE_VERIFY_FAILED`, your network is inspecting TLS. Export the Mac's trusted roots once (the bot then verifies against them):
+### Windows
+
+1. Install **Python 3.11 or newer** from https://www.python.org/downloads/ and tick **"Add python.exe to PATH"** in the installer.
+2. Copy the `updown_bot` folder (or unzip `updown_bot_windows.zip`) anywhere, for example `C:\bots\updown_bot`.
+3. Double-click **`setup_windows.bat`** once. It creates `.venv`, installs the two dependencies and runs the tests.
+4. Double-click **`start_bot.bat`** to start paper trading. For a fresh $200 start, run it from a terminal as `start_bot.bat --fresh`.
+5. Double-click **`start_dashboard.bat`**. It opens http://127.0.0.1:8766 in your browser.
+6. `report.bat` prints the text report.
+
+The same by hand in PowerShell:
+
+```powershell
+cd C:\bots\updown_bot
+py -3 -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python run.py --fresh
+```
+
+Then, in a second PowerShell window:
+
+```powershell
+.venv\Scripts\python dashboard.py --port 8766
+```
+
+Windows notes:
+- **Certificates:** the bot trusts the Windows certificate store automatically, including corporate proxy roots, so you don't need the `certs/` step used on the Mac.
+- **Clock:** keep *Settings → Time & language → Set time automatically* on. The bot compares Chainlink timestamps with your PC clock, and a drift of a second or more degrades its price estimate.
+- **Sleep:** stop the PC sleeping while it runs (*Settings → System → Power*); a sleeping PC drops the websocket feeds. The watchdogs reconnect after it wakes, but the bot misses those windows.
+- **Stopping:** press Ctrl+C in the bot window. The paper portfolio is saved and resumes next time.
+
+**Corporate networks (Mac):** if Coinbase or Polymarket connections fail with `CERTIFICATE_VERIFY_FAILED`, your network is inspecting TLS. Export the Mac's trusted roots once (the bot then verifies against them):
 
 ```bash
 security find-certificate -a -p /Library/Keychains/System.keychain /System/Library/Keychains/SystemRootCertificates.keychain > certs/system_ca.pem

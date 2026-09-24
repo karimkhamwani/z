@@ -14,6 +14,7 @@ from .feeds import AssetPrices, run_chainlink, run_coinbase
 from .ledger import Ledger
 from .markets import Market, TF_SECONDS, fetch_market, fetch_winner, window_start
 from .model import fair_value
+from .net import atomic_write_text
 from .paper import PaperExecutor, Portfolio, credit_rebates, rebate_rate, settle, utc_day
 from .risk import RiskManager
 from .strategy import evaluate
@@ -31,7 +32,7 @@ class Engine:
         self.data.mkdir(parents=True, exist_ok=True)
         self.state_path = self.data / "portfolio.json"
         if self.state_path.exists() and not fresh:
-            self.pf = Portfolio.from_json(self.state_path.read_text())
+            self.pf = Portfolio.from_json(self.state_path.read_text(encoding="utf-8"))
             log.info("resumed portfolio: equity %.2f, %d open positions", self.pf.equity, len(self.pf.positions))
         else:
             e = cfg.account.starting_equity
@@ -287,9 +288,7 @@ class Engine:
                          "daily_loss_stop_basis": self.cfg.risk.daily_loss_stop_basis,
                          "daily_loss_limit_usd": self.risk.daily_loss_limit(),
                          "max_drawdown_kill_pct": self.cfg.risk.max_drawdown_kill_pct}}
-        tmp = self.data / "status.tmp"
-        tmp.write_text(json.dumps(st))
-        tmp.replace(self.data / "status.json")
+        atomic_write_text(self.data / "status.json", json.dumps(st))
 
     async def status_loop(self) -> None:
         start = time.time()

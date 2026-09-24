@@ -14,15 +14,33 @@ _CTX: ssl.SSLContext | None = None
 
 
 def ssl_context(ca_bundle: str = "", relax_x509_strict: bool = True) -> ssl.SSLContext:
-    """Verified TLS context. `ca_bundle` adds extra roots (e.g. a corporate proxy CA exported from the OS keychain).
+    """Verified TLS context trusting: the OS certificate store (on Windows this includes corporate/proxy roots),
+    certifi's Mozilla roots, and optionally an extra PEM bundle (e.g. roots exported from the macOS keychain).
     `relax_x509_strict` only drops Python 3.13's strict-X.509 flag; the certificate chain is still verified."""
     global _CTX
-    cafile = ca_bundle if ca_bundle and Path(ca_bundle).exists() else certifi.where()
-    ctx = ssl.create_default_context(cafile=cafile)
+    ctx = ssl.create_default_context()          # loads the OS store (Windows: ROOT + CA system stores)
+    ctx.load_verify_locations(cafile=certifi.where())
+    if ca_bundle and Path(ca_bundle).exists():
+        ctx.load_verify_locations(cafile=ca_bundle)
     if relax_x509_strict and hasattr(ssl, "VERIFY_X509_STRICT"):
         ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
     _CTX = ctx
     return ctx
+
+
+def atomic_write_text(path: Path, text: str, retries: int = 20) -> None:
+    """Write via temp file + replace. On Windows, replace fails while another process (the dashboard) has the
+    target open, so retry briefly instead of crashing the bot."""
+    import time
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    for i in range(retries):
+        try:
+            tmp.replace(path)
+            return
+        except PermissionError:
+            time.sleep(0.02 * (i + 1))
+    # give up quietly for this write; the next one (≤1 s later) will succeed
 
 
 def get_ctx() -> ssl.SSLContext:
