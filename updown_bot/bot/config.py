@@ -61,8 +61,11 @@ class Risk:
     clip_pct_equity: float = 0.05
     min_shares: float = 5
     max_clip_usd: float = 250
+    max_shares_per_order: float = 5      # 0 = no cap
+    max_market_usd: float = 30           # 0 = no cap; includes fees and in-flight orders
     max_market_exposure_pct: float = 0.25
-    daily_loss_stop_pct: float = 0.15
+    daily_loss_stop_pct: float = 0.50
+    daily_loss_stop_basis: str = "initial"   # "initial" = % of starting capital, "day_start" = % of equity at 00:00 UTC
     max_drawdown_kill_pct: float = 0.35
 
 
@@ -110,4 +113,12 @@ def load_config(path: str | Path) -> Config:
             setattr(cfg, name, _build(cls, raw.pop(name)))
     if raw:
         raise ValueError(f"Unknown config sections: {sorted(raw)}")
+    r = cfg.risk
+    if r.max_shares_per_order and r.max_shares_per_order < r.min_shares:
+        raise ValueError(f"risk.max_shares_per_order ({r.max_shares_per_order}) is below risk.min_shares ({r.min_shares}); "
+                         "Polymarket's minimum order is 5 shares, so no order could ever be placed")
+    if r.daily_loss_stop_basis not in ("initial", "day_start"):
+        raise ValueError('risk.daily_loss_stop_basis must be "initial" or "day_start"')
+    if r.max_market_usd and r.max_market_usd < r.min_shares * 1.0:
+        raise ValueError(f"risk.max_market_usd ({r.max_market_usd}) is too small for a {r.min_shares}-share order")
     return cfg

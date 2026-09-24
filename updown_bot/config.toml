@@ -44,9 +44,12 @@ fee_rate = 0.07                # crypto taker fee: rate × shares × p × (1 −
 [risk]
 clip_pct_equity = 0.05         # each order risks this share of equity  → scales as equity grows
 min_shares = 5                 # Polymarket minimum order size
-max_clip_usd = 250             # hard cap per order
-max_market_exposure_pct = 0.25 # max cost at risk in one market, as a share of equity
-daily_loss_stop_pct = 0.15     # stop opening positions for the rest of the UTC day
+max_clip_usd = 250             # hard cap per order (USD)
+max_shares_per_order = 5       # hard cap per order (shares); 0 = no cap. Can't be below min_shares (5)
+max_market_usd = 30            # max total spent in one market incl. fees and in-flight orders; 0 = no cap
+max_market_exposure_pct = 0.25 # also cap each market at this share of equity (the lower cap wins)
+daily_loss_stop_pct = 0.50     # stop opening positions for the rest of the UTC day once today's loss reaches this…
+daily_loss_stop_basis = "initial"  # …share of starting capital ("initial": 50% × $200 = $100/day) or of equity at 00:00 UTC ("day_start")
 max_drawdown_kill_pct = 0.35   # halt the bot if equity falls this far below its peak
 
 [rebates]

@@ -196,7 +196,7 @@ function renderLive() {
   $("k-reb").textContent = usd(p.rebates);
   $("k-reb-s").textContent = `tier ${(p.tier * 100).toFixed(0)}% · 30d wV ${usd(p.wv_30d)}`;
   const c = live.config;
-  $("foot").textContent = `${c.assets.join(", ").toUpperCase()} ${c.timeframe} · signal: momentum ≥ ${c.min_momentum_bp} bp over 3 s and edge ≥ ${(c.min_edge * 100).toFixed(1)}¢ after fee · paper fills: ${c.latency_ms} ms latency, ${Math.round(c.haircut * 100)}% of displayed size · sizing ${pct(c.clip_pct_equity, 0)} of equity per order, ${pct(c.max_market_exposure_pct, 0)} per market · stops: ${pct(c.daily_loss_stop_pct, 0)} daily, ${pct(c.max_drawdown_kill_pct, 0)} drawdown · uptime ${Math.round((live.ts - live.started) / 60)} min`;
+  $("foot").textContent = `${c.assets.join(", ").toUpperCase()} ${c.timeframe} · signal: momentum ≥ ${c.min_momentum_bp} bp over 3 s and edge ≥ ${(c.min_edge * 100).toFixed(1)}¢ after fee · paper fills: ${c.latency_ms} ms latency, ${Math.round(c.haircut * 100)}% of displayed size · sizing ${pct(c.clip_pct_equity, 0)} of equity per order${c.max_shares_per_order ? ` (max ${c.max_shares_per_order} shares)` : ""}, per market max ${c.max_market_usd ? "$" + c.max_market_usd + " or " : ""}${pct(c.max_market_exposure_pct, 0)} of equity · stops: daily loss $${(c.daily_loss_limit_usd || 0).toFixed(0)} (${pct(c.daily_loss_stop_pct, 0)} of ${c.daily_loss_stop_basis === "initial" ? "starting capital" : "day-start equity"}), ${pct(c.max_drawdown_kill_pct, 0)} drawdown from peak · uptime ${Math.round((live.ts - live.started) / 60)} min`;
 
   const m = (live.markets || [])[0];
   if (!m) { $("live-body").innerHTML = `<div class="empty">No active market right now.</div>`; $("live-sub").textContent = ""; return; }
@@ -236,7 +236,7 @@ function renderLive() {
     </div>
     ${m.reference == null ? `<div class="banner info">Not trading this window: the bot started after it opened, so it doesn't have the Chainlink prints needed for the start price. It trades from the next window (${hhmmss(m.end)}).</div>` : ""}
     ${m.chainlink_age_s != null && m.chainlink_age_s > 10 ? `<div class="banner">Chainlink feed stale (${Math.round(m.chainlink_age_s)} s) — trading paused until it reconnects.</div>` : ""}
-    <div class="muted">${pos ? `Position: ${pos.up_shares.toFixed(2)} Up / ${pos.down_shares.toFixed(2)} Down · cost ${usd(pos.cost)} · ${pos.orders} orders` : "No position in this market."}</div>`;
+    <div class="muted">${pos ? `Position: ${pos.up_shares.toFixed(2)} Up / ${pos.down_shares.toFixed(2)} Down · spent ${usd(pos.cost)}${c.max_market_usd ? ` of $${c.max_market_usd} cap` : ""} · ${pos.orders} orders` : "No position in this market."}</div>`;
 }
 
 // ---------- charts ----------
@@ -309,6 +309,7 @@ function table(id, cols, rows, empty) {
   t.innerHTML = "<thead><tr>" + cols.map(c => `<th class="${c.n ? "n" : ""}">${c.h}</th>`).join("") + "</tr></thead><tbody>" +
     rows.map(r => "<tr>" + cols.map(c => `<td class="${c.n ? "n" : ""} ${c.cls ? c.cls(r) : ""}">${c.f(r)}</td>`).join("") + "</tr>").join("") + "</tbody>";
 }
+function safe(name, fn) { try { fn(); } catch (e) { console.error(`dashboard: ${name} failed`, e); } }
 const outcomeChip = o => `<span class="chip ${o === "Up" ? "up" : "down"}">${o}</span>`;
 function renderPerf() {
   if (!perf || perf.empty) return;
@@ -330,34 +331,35 @@ function renderPerf() {
       b.onclick = () => { tab = k; renderPerf(); }; tabs.appendChild(b);
     }
   }
+  if (!perf.tables[tab]) tab = Object.keys(perf.tables)[0];
   [...tabs.children].forEach(b => b.setAttribute("aria-selected", b.dataset.k === tab));
-  table("btable", [
+  safe("breakdown", () => table("btable", [
     {h: "bucket", f: r => r.bucket}, {h: "fills", n: 1, f: r => r.fills}, {h: "notional", n: 1, f: r => usd(r.notional)},
     {h: "net P&L", n: 1, f: r => sgn(r.pnl), cls: r => cls(r.pnl)}, {h: "% of notional", n: 1, f: r => r.pnl_pct == null ? "—" : r.pnl_pct.toFixed(2) + "%", cls: r => cls(r.pnl_pct)},
     {h: "win rate", n: 1, f: r => pct(r.win_rate)}, {h: "avg model fair", n: 1, f: r => f3(r.avg_fair)}
-  ], perf.tables[tab].rows.filter(r => r.fills), "No settled fills yet.");
-  table("fills", [
+  ], perf.tables[tab].rows.filter(r => r.fills), "No settled fills yet."));
+  safe("fills", () => table("fills", [
     {h: "time", f: r => hhmmss(r.ts)}, {h: "market", f: r => r.slug.replace("-updown-", " ").replace(/-(\d+)$/, (m, t) => " " + hhmmss(+t).slice(0, 5))},
     {h: "side", f: r => outcomeChip(r.outcome)}, {h: "shares", n: 1, f: r => r.shares.toFixed(2)}, {h: "avg px", n: 1, f: r => f3(r.avg_price)},
     {h: "cash", n: 1, f: r => usd(r.cash)}, {h: "fee", n: 1, f: r => usd(r.fee)}, {h: "fair", n: 1, f: r => f3(r.fair)},
     {h: "edge", n: 1, f: r => (r.edge * 100).toFixed(1) + "¢", cls: r => cls(r.edge)}, {h: "mom", n: 1, f: r => r.momentum_bp.toFixed(2) + "bp"},
     {h: "left", n: 1, f: r => Math.round(r.seconds_left) + "s"},
     {h: "result", n: 1, f: r => r.won == null ? '<span class="muted">open</span>' : sgn(r.pnl), cls: r => r.won == null ? "" : cls(r.pnl)}
-  ], perf.recent_fills, "No fills yet. The bot only trades when momentum and edge line up — this can take a while.");
-  table("settled", [
+  ], perf.recent_fills, "No fills yet. The bot only trades when momentum and edge line up — this can take a while."));
+  safe("settled", () => table("settled", [
     {h: "time", f: r => hhmmss(r.ts)}, {h: "market", f: r => r.slug.replace("-updown-", " ")}, {h: "winner", f: r => outcomeChip(r.winner)},
     {h: "model", f: r => r.model_winner ? (r.model_winner === r.winner ? "✓" : "✗ " + r.model_winner) : "—"},
     {h: "Up/Down sh", n: 1, f: r => `${r.up_shares.toFixed(1)} / ${r.down_shares.toFixed(1)}`}, {h: "cost", n: 1, f: r => usd(r.cost)},
     {h: "payout", n: 1, f: r => usd(r.payout)}, {h: "P&L", n: 1, f: r => sgn(r.pnl), cls: r => cls(r.pnl)}, {h: "equity", n: 1, f: r => usd(r.equity_after)}
-  ], perf.recent_settlements, "Nothing settled yet.");
-  table("rej", [{h: "reason", f: r => r.reason.replaceAll("_", " ")}, {h: "count", n: 1, f: r => r.n}, {h: "avg edge", n: 1, f: r => r.avg_edge == null ? "—" : (r.avg_edge * 100).toFixed(1) + "¢"}], perf.rejections, "None yet.");
-  table("daily", [{h: "day", f: r => r.day}, {h: "fills", n: 1, f: r => r.fills}, {h: "notional", n: 1, f: r => usd(r.notional)}, {h: "fees", n: 1, f: r => usd(r.fees)}, {h: "net P&L", n: 1, f: r => sgn(r.pnl), cls: r => cls(r.pnl)}], perf.daily, "No settled days yet.");
+  ], perf.recent_settlements, "Nothing settled yet."));
+  safe("rejections", () => table("rej", [{h: "reason", f: r => r.reason.replaceAll("_", " ")}, {h: "count", n: 1, f: r => r.n}, {h: "avg edge", n: 1, f: r => r.avg_edge == null ? "—" : (r.avg_edge * 100).toFixed(1) + "¢"}], perf.rejections, "None yet."));
+  safe("daily", () => table("daily", [{h: "day", f: r => r.day}, {h: "fills", n: 1, f: r => r.fills}, {h: "notional", n: 1, f: r => usd(r.notional)}, {h: "fees", n: 1, f: r => usd(r.fees)}, {h: "net P&L", n: 1, f: r => sgn(r.pnl), cls: r => cls(r.pnl)}], perf.daily, "No settled days yet."));
 }
 
 // ---------- loops ----------
-async function pollLive() { try { live = await (await fetch("/api/live")).json(); renderLive(); } catch (e) { $("updated").textContent = "dashboard server unreachable"; } }
-async function pollPerf() { try { perf = await (await fetch("/api/perf")).json(); renderPerf(); renderEquity(); } catch (e) {} }
-async function pollWindow() { try { await renderWindow(); } catch (e) {} }
+async function pollLive() { try { live = await (await fetch("/api/live")).json(); } catch (e) { $("updated").textContent = "dashboard server unreachable"; return; } safe("live", renderLive); }
+async function pollPerf() { try { perf = await (await fetch("/api/perf")).json(); } catch (e) { console.error("dashboard: /api/perf failed", e); return; } safe("perf", renderPerf); safe("equity", renderEquity); }
+async function pollWindow() { try { await renderWindow(); } catch (e) { console.error("dashboard: window chart failed", e); } }
 pollLive(); pollPerf(); setTimeout(pollWindow, 400);
 setInterval(pollLive, 1000); setInterval(pollPerf, 5000); setInterval(pollWindow, 2000);
 </script>

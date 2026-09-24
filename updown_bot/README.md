@@ -68,16 +68,22 @@ Every 100 ms, for each live market:
 7. **Settlement:** Polymarket's official result, read on-chain from the Conditional Tokens contract. Markets resolve there about 60–100 s after they end; the CLOB API's `winner` flag lags by many minutes and is only a fallback. The bot's own TWAP estimate is logged next to the official result as a check.
 8. **Rebates (estimate):** yesterday's taker fees × your tier, credited after 00:00 UTC. Tiers use the documented 30-day weighted volume.
 
-### Sizing and scaling ($200 → more)
-| Setting | Default | At $200 | At $2,000 |
-|---|---|---|---|
-| `clip_pct_equity` (per order) | 5% | $10 | $100 |
-| `max_market_exposure_pct` | 25% | $50 | $500 |
-| `max_clip_usd` | $250 | — | — |
-| `daily_loss_stop_pct` | 15% | stop at −$30/day | −$300/day |
-| `max_drawdown_kill_pct` | 35% | halt at −$70 from peak | — |
+### Sizing and limits
+Each order's size is the **smallest** of these, all set in `[risk]` in `config.toml`:
 
-Sizes grow automatically with equity. Past a few thousand dollars, the order book's depth (median fill in the analysed bots: ~$8) caps you before these percentages do. Add more assets (`assets = ["btc","eth","sol"]`) rather than bigger orders.
+| Setting | Default | Meaning |
+|---|---|---|
+| `max_shares_per_order` | **5** | hard cap per order in shares (0 = no cap). Polymarket's minimum order is also 5, so by default every order is exactly 5 shares |
+| `max_market_usd` | **$30** | max total spent in one market, **including fees and orders still in flight** (0 = no cap) |
+| `max_market_exposure_pct` | 25% | also caps each market at this share of equity; the lower of the two caps wins |
+| `clip_pct_equity` | 5% | order size as a share of equity (what makes size grow once you lift the share cap) |
+| `max_clip_usd` | $250 | hard cap per order in USD |
+| `daily_loss_stop_pct` + `daily_loss_stop_basis` | 50% of `"initial"` | no new positions for the rest of the UTC day once today's loss reaches 50% of starting capital ($100 on $200). `"day_start"` measures it against equity at 00:00 UTC instead |
+| `max_drawdown_kill_pct` | 35% | halt the bot if equity falls this far below its peak |
+
+With the defaults, an order costs at most about $4.80 (5 shares at 95¢ plus fee), so a market takes several orders to reach $30. The bot stops adding to a market once the next 5-share order would push total spend past $30.
+
+**Scaling up later:** raise `max_market_usd` and `max_shares_per_order` (or set them to 0) and let `clip_pct_equity` and `max_market_exposure_pct` size positions from equity. Past a few thousand dollars, order-book depth limits you before these settings do (median fill in the analysed bots: about $8), so add assets (`assets = ["btc","eth","sol"]`) rather than making orders bigger.
 
 ---
 

@@ -120,18 +120,62 @@ class TestSettlementAndRebates(unittest.TestCase):
 
 
 class TestRiskAndStrategy(unittest.TestCase):
-    def test_clip_scales_with_equity(self):
+    def test_clip_scales_with_equity_when_uncapped(self):
         pf = Portfolio(cash=200, starting_equity=200, peak_equity=200)
-        rm = RiskManager(Risk(), pf)
-        self.assertAlmostEqual(rm.clip_shares("c", 0.5, 5), 20.0)          # 5% of 200 = $10 → 20 shares
+        rm = RiskManager(Risk(max_shares_per_order=0, max_market_usd=0), pf)
+        self.assertAlmostEqual(rm.clip_shares("c", 0.5, 5, fee_rate=0.0), 20.0)   # 5% of 200 = $10 → 20 shares
         pf.cash = 2000
-        self.assertAlmostEqual(rm.clip_shares("c", 0.5, 5), 200.0)
+        self.assertAlmostEqual(rm.clip_shares("c", 0.5, 5, fee_rate=0.0), 200.0)
+
+    def test_max_shares_per_order(self):
+        pf = Portfolio(cash=2000, starting_equity=2000, peak_equity=2000)
+        rm = RiskManager(Risk(max_shares_per_order=5, max_market_usd=0), pf)
+        self.assertEqual(rm.clip_shares("c", 0.5, 5), 5)
+
+    def test_market_usd_cap_includes_fees_and_inflight(self):
+        pf = Portfolio(cash=1000, starting_equity=1000, peak_equity=1000)
+        rm = RiskManager(Risk(max_shares_per_order=5, max_market_usd=30), pf)
+        pf.positions["c"] = Position("s", "c", 0, up_shares=40, cost=28.0)      # $2 left under the $30 cap
+        self.assertEqual(rm.clip_shares("c", 0.5, 5), 0.0)                      # 5 sh @0.50 + fee = $2.59 → doesn't fit
+        pf.positions["c"].cost = 25.0                                           # $5 left
+        self.assertEqual(rm.clip_shares("c", 0.5, 5), 5)
+        rm.reserve("c", 2.6)                                                    # an order in flight uses $2.60
+        self.assertEqual(rm.clip_shares("c", 0.5, 5), 0.0)
+        rm.release("c", 2.6)
+        self.assertEqual(rm.clip_shares("c", 0.5, 5), 5)
+
+    def test_config_rejects_share_cap_below_exchange_minimum(self):
+        import tempfile, os
+        from bot.config import load_config
+        with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as f:
+            f.write("[risk]\nmax_shares_per_order = 3\n")
+        try:
+            with self.assertRaises(ValueError):
+                load_config(f.name)
+        finally:
+            os.unlink(f.name)
 
     def test_drawdown_kill(self):
         pf = Portfolio(cash=200, starting_equity=200, peak_equity=200, day_start_equity=200)
         rm = RiskManager(Risk(), pf)
         pf.cash = 120
         self.assertIn("drawdown", rm.check_breakers())
+
+    def test_daily_stop_on_initial_capital(self):
+        pf = Portfolio(cash=200, starting_equity=200, peak_equity=200, day_start_equity=200)
+        rm = RiskManager(Risk(daily_loss_stop_pct=0.5, daily_loss_stop_basis="initial", max_drawdown_kill_pct=0.9), pf)
+        pf.cash = 101                                    # down $99 today → still trading
+        self.assertEqual(rm.check_breakers(), "")
+        pf.cash = 100                                    # down $100 = 50% of $200 → stop
+        self.assertIn("daily stop", rm.check_breakers())
+
+    def test_daily_stop_basis_is_initial_even_after_growth(self):
+        pf = Portfolio(cash=400, starting_equity=200, peak_equity=400, day_start_equity=400)
+        rm = RiskManager(Risk(daily_loss_stop_pct=0.5, daily_loss_stop_basis="initial", max_drawdown_kill_pct=0.9), pf)
+        pf.cash = 301                                    # down $99 from today's $400 → limit is still $100
+        self.assertEqual(rm.check_breakers(), "")
+        pf.cash = 300
+        self.assertIn("daily stop", rm.check_breakers())
 
     def test_limit_respects_edge(self):
         lim = max_limit_for_edge(0.70, 0.02, 0.07, 0.01)

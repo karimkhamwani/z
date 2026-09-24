@@ -151,17 +151,19 @@ class Engine:
                     continue
                 if pos and pos.orders >= sc.max_orders_per_market:
                     continue
-                shares = self.risk.clip_shares(m.condition_id, intent.limit, m.min_size)
+                shares = self.risk.clip_shares(m.condition_id, intent.limit, m.min_size, m.fee_rate)
                 if shares <= 0:
                     continue
+                reserve = shares * (intent.limit + m.fee_rate * intent.limit * (1 - intent.limit))
+                self.risk.reserve(m.condition_id, reserve)
                 self.stats["signals"] += 1
                 self.inflight.add(key)
                 self.last_order[key] = now
                 ctx = {"now": now, "fair": intent.fair, "momentum_bp": intent.momentum_bp,
                        "seconds_left": m.end - now, "ask": intent.ask}
-                asyncio.create_task(self._execute(m, intent, shares, ctx))
+                asyncio.create_task(self._execute(m, intent, shares, ctx, reserve))
 
-    async def _execute(self, m: Market, intent, shares: float, ctx: dict) -> None:
+    async def _execute(self, m: Market, intent, shares: float, ctx: dict, reserve: float) -> None:
         key = (m.slug, intent.outcome)
         try:
             fill = await self.exec.buy(market=m, outcome=intent.outcome, limit=intent.limit, max_shares=shares,
@@ -179,6 +181,7 @@ class Engine:
                                        "seconds_left": m.end - time.time()})
         finally:
             self.inflight.discard(key)
+            self.risk.release(m.condition_id, reserve)
 
     # ---------- settlement & rebates ----------
     async def settle_loop(self) -> None:
@@ -277,8 +280,12 @@ class Engine:
                          "min_momentum_bp": self.cfg.strategy.min_momentum_bp, "min_edge": self.cfg.strategy.min_edge,
                          "latency_ms": self.cfg.execution.latency_ms, "haircut": self.cfg.execution.liquidity_haircut,
                          "clip_pct_equity": self.cfg.risk.clip_pct_equity,
+                         "max_shares_per_order": self.cfg.risk.max_shares_per_order,
+                         "max_market_usd": self.cfg.risk.max_market_usd,
                          "max_market_exposure_pct": self.cfg.risk.max_market_exposure_pct,
                          "daily_loss_stop_pct": self.cfg.risk.daily_loss_stop_pct,
+                         "daily_loss_stop_basis": self.cfg.risk.daily_loss_stop_basis,
+                         "daily_loss_limit_usd": self.risk.daily_loss_limit(),
                          "max_drawdown_kill_pct": self.cfg.risk.max_drawdown_kill_pct}}
         tmp = self.data / "status.tmp"
         tmp.write_text(json.dumps(st))
