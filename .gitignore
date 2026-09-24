@@ -1,0 +1,12 @@
+# GitHub rejects files > 100 MB — raw activity dumps can exceed that (the CSV copy of the same data is kept)
+wallet_*/raw/activity_*.json
+
+# machine-specific (exported from this Mac's keychain; includes the corporate network's root CA)
+updown_bot/certs/
+
+# runtime / environment
+updown_bot/.venv/
+updown_bot/data/
+__pycache__/
+*.pyc
+.DS_Store
