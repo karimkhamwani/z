@@ -1,0 +1,56 @@
+# Polymarket Up/Down momentum bot — configuration
+# Every value here is a starting hypothesis from the wallet teardowns. Tune it from paper results.
+
+mode = "paper"                 # "paper" only; live execution is a stub (see bot/live.py)
+
+[account]
+starting_equity = 200.0        # USD
+
+[markets]
+assets = ["btc"]               # btc, eth, sol, xrp, bnb, doge (each needs a Chainlink + Coinbase feed)
+timeframe = "5m"               # 5m | 15m | 1h | 4h
+
+[feeds]
+coinbase = true                # fast spot feed (leading indicator)
+ca_bundle = "certs/system_ca.pem"  # "" = certifi only. Needed on networks that inspect TLS.
+relax_x509_strict = true       # Python 3.13 rejects some corporate CAs; chain is still verified
+
+[model]
+twap_lookback_s = 60           # markets settle on Chainlink 60s TWAP (end) vs 60s TWAP (start)
+vol_halflife_s = 600           # EWMA half-life for per-second volatility
+vol_floor_bp = 0.25            # per-second vol floor, basis points
+basis_sigma_usd = 4.0          # uncertainty of our Chainlink-now estimate (USD)
+
+[strategy]
+momentum_window_s = 3          # the signal both bots profit from
+min_momentum_bp = 0.5          # coin must have moved >= this toward the side we buy
+min_edge = 0.02                # $/share required after the taker fee
+min_price = 0.05
+max_price = 0.95
+min_seconds_left = 5           # don't send orders in the last N seconds
+min_seconds_elapsed = 3        # wait for the start reference to be known
+max_book_age_s = 2.0           # skip if the book hasn't updated recently
+side_cooldown_s = 2.0          # min gap between orders on the same side of a market
+max_orders_per_market = 30
+
+[execution]
+latency_ms = 300               # paper: re-read the book this long after the signal, then fill
+liquidity_haircut = 0.5        # paper: assume only this fraction of displayed size is really available
+max_slippage = 0.02            # limit = ask + this (never above fair − fee − min_edge)
+fee_rate = 0.07                # crypto taker fee: rate × shares × p × (1 − p)
+
+[risk]
+clip_pct_equity = 0.05         # each order risks this share of equity  → scales as equity grows
+min_shares = 5                 # Polymarket minimum order size
+max_clip_usd = 250             # hard cap per order
+max_market_exposure_pct = 0.25 # max cost at risk in one market, as a share of equity
+daily_loss_stop_pct = 0.15     # stop opening positions for the rest of the UTC day
+max_drawdown_kill_pct = 0.35   # halt the bot if equity falls this far below its peak
+
+[rebates]
+estimate_taker_rebates = true  # credit paper taker rebates by tier (from paper volume), paid at UTC midnight
+
+[logging]
+data_dir = "data"
+snapshot_every_s = 1.0         # 1 Hz market snapshots for later tuning/replay
+status_every_s = 15
