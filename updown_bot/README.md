@@ -97,13 +97,13 @@ Set `mode = "live"`, then:
 python manage.py run --live
 ```
 
-It prints the wallet, balance and limits and asks you to type **LIVE**. The dashboard (`python manage.py dashboard --live`) shows a red **LIVE · REAL MONEY** badge, the account strip (cash, positions, last sync, claiming, kill switch), and the **Orders** panel with every order and the exchange's answer.
+It prints the wallet, balance and limits and starts trading. (Set `require_confirmation = true` under `[live]` to also require typing **LIVE**.) The dashboard (`python manage.py dashboard --live`) shows a red **LIVE · REAL MONEY** badge, the account strip (cash, positions, last sync, claiming, kill switch), and the **Orders** panel with every order and the exchange's answer.
 
 ### Safety controls
 | Control | What it does |
 |---|---|
 | Kill switch | create a file named `STOP` in `data_live/` → no new orders at once; delete it to resume |
-| Two-key start | `mode = "live"` **and** `--live` **and** typing LIVE (`--yes` skips the prompt, e.g. under a service manager) |
+| Two-key start | `mode = "live"` **and** the `--live` flag; either one alone refuses to start. Optional typed LIVE prompt: `require_confirmation = true` |
 | Stale balance | no orders if the balance hasn't synced for 3 × `sync_every_s` |
 | Low cash | no orders while pUSD cash < `min_cash_usd` ($5) |
 | Rejections | "not enough balance/allowance" halts at once; `max_consecutive_errors` (5) other errors in a row halts |
@@ -116,7 +116,7 @@ It prints the wallet, balance and limits and asks you to type **LIVE**. The dash
 Live halts are sticky until you restart. The reason is shown on the dashboard and in `data_live/bot.log` (rotated, 5 × 5 MB).
 
 ### Run it unattended
-Use `python manage.py run --live --yes` under a service manager that restarts it: Task Scheduler or NSSM on Windows, `launchd` on macOS, `systemd` on Linux. On restart it resumes its state and cancels stray orders.
+Use `python manage.py run --live` under a service manager that restarts it: Task Scheduler or NSSM on Windows, `launchd` on macOS, `systemd` on Linux. On restart it resumes its state and cancels stray orders.
 
 ### Before real money: know the gap
 Paper assumed 300 ms latency and 50% of displayed size. Live competes with faster bots, so start with the small caps you've set and compare the Orders panel (fill rate, latency) and fills with your paper results before raising any limit. The bot's per-fill fee is an estimate from the published formula; the balance sync always reflects the real cash.

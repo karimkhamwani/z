@@ -3,7 +3,7 @@
 
 mode = "paper"                 # "paper" = simulated fills
                                # "shadow" = real account + real decisions, orders NOT sent (safe dry run)
-                               # "live" = real orders; also needs `python manage.py run --live` and typing LIVE
+                               # "live" = real orders; start with `python manage.py run --live`
                                # shadow/live read keys from .env (see .env.example) and write to data_live/
 
 [account]
@@ -67,7 +67,7 @@ order_timeout_s = 10           # give up waiting for an order response after thi
 max_consecutive_errors = 5     # halt new orders after this many order errors in a row
 max_orders_per_minute = 20
 min_cash_usd = 5               # don't open positions while pUSD cash is below this
-require_confirmation = true    # type LIVE at startup; pass --yes to skip (e.g. under a service manager)
+require_confirmation = false   # true = also type LIVE at startup (--yes skips it)
 
 [logging]
 data_dir = "data"              # relative to this file

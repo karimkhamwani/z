@@ -71,7 +71,7 @@ def main() -> None:
     ap.add_argument("--fresh", action="store_true", help="discard saved state (live: re-read starting capital)")
     ap.add_argument("--minutes", type=float, default=None, help="stop after this many minutes")
     ap.add_argument("--live", action="store_true", help='required with mode = "live": confirms real-money trading')
-    ap.add_argument("--yes", action="store_true", help="skip the typed LIVE confirmation (for service managers)")
+    ap.add_argument("--yes", action="store_true", help="skip the typed LIVE prompt if live.require_confirmation = true")
     ap.add_argument("--preflight", action="store_true", help="check the live account and exit without trading")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()

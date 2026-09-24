@@ -84,7 +84,7 @@ class Live:
     max_consecutive_errors: int = 5      # halt new orders after this many errors in a row
     max_orders_per_minute: int = 20
     min_cash_usd: float = 5              # don't open positions when pUSD cash is below this
-    require_confirmation: bool = True    # type LIVE at startup (skip with --yes, e.g. under a service manager)
+    require_confirmation: bool = False   # true = also type LIVE at startup (skip with --yes)
 
 
 @dataclass
