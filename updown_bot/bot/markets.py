@@ -1,10 +1,12 @@
-"""Market discovery (Gamma API) and official resolution (CLOB API)."""
+"""Market discovery (Gamma API) and official resolution (on-chain Conditional Tokens, CLOB API fallback)."""
 from __future__ import annotations
 
+import asyncio
 import json
+import urllib.request
 from dataclasses import dataclass
 
-from .net import get_json
+from .net import UA, get_ctx, get_json
 
 TF_SECONDS = {"5m": 300, "15m": 900, "1h": 3600, "4h": 14400}
 
@@ -54,10 +56,55 @@ async def fetch_market(asset: str, timeframe: str, start: int) -> Market | None:
                   fee_rate=float(fee), twap_lookback=lookback)
 
 
-async def fetch_winner(condition_id: str) -> str | None:
-    """'Up' / 'Down' once Polymarket has resolved the market, else None."""
+POLYGON_RPC = "https://polygon-bor-rpc.publicnode.com"
+CTF = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"   # Polymarket Conditional Tokens (Polygon)
+SEL_DENOMINATOR = "0xdd34de67"                        # payoutDenominator(bytes32)
+SEL_NUMERATORS = "0x0504c814"                         # payoutNumerators(bytes32,uint256)
+
+
+def _eth_call_sync(data: str) -> int:
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "eth_call",
+                       "params": [{"to": CTF, "data": data}, "latest"]}).encode()
+    req = urllib.request.Request(POLYGON_RPC, data=body, headers={"content-type": "application/json", **UA})
+    with urllib.request.urlopen(req, timeout=10, context=get_ctx()) as r:
+        return int(json.load(r)["result"], 16)
+
+
+async def fetch_winner_onchain(condition_id: str) -> str | None:
+    """Read the payout vector from the Conditional Tokens contract. Up/Down markets list outcomes as
+    ["Up", "Down"], so index 0 = Up. Markets resolve on-chain ~60-100 s after they end — much sooner than the
+    CLOB API's `winner` flag updates."""
+    c = condition_id[2:].rjust(64, "0")
+    den = await asyncio.to_thread(_eth_call_sync, SEL_DENOMINATOR + c)
+    if den == 0:
+        return None
+    n_up = await asyncio.to_thread(_eth_call_sync, SEL_NUMERATORS + c + "0" * 64)
+    n_down = await asyncio.to_thread(_eth_call_sync, SEL_NUMERATORS + c + "0" * 63 + "1")
+    if n_up == n_down:
+        return "Split"
+    return "Up" if n_up > n_down else "Down"
+
+
+async def fetch_winner_clob(condition_id: str) -> str | None:
     d = await get_json(f"https://clob.polymarket.com/markets/{condition_id}")
     for t in d.get("tokens", []):
         if t.get("winner"):
             return t["outcome"]
     return None
+
+
+async def fetch_winner(condition_id: str) -> tuple[str | None, str]:
+    """('Up' | 'Down' | 'Split' | None, source). On-chain first, CLOB API as a fallback."""
+    try:
+        w = await fetch_winner_onchain(condition_id)
+        if w:
+            return w, "onchain"
+    except Exception:
+        pass
+    try:
+        w = await fetch_winner_clob(condition_id)
+        if w:
+            return w, "clob"
+    except Exception:
+        pass
+    return None, ""

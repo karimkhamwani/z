@@ -65,7 +65,7 @@ Every 100 ms, for each live market:
 4. **Signal:** the coin moved **≥ 0.5 bp in the last 3 s** toward a side, **and** that side's ask is below fair value by **≥ 2¢ after the taker fee** (fee = 0.07 × p × (1 − p) per share).
 5. **Order:** a FAK limit buy at up to ask + 2¢, never above the price that keeps 2¢ of edge after fees.
 6. **Paper fill:** wait `latency_ms` (300 ms), re-read the live book, and take at most `liquidity_haircut` (50%) of each ask level up to the limit. Fees are charged per level; fills under 5 shares or $1 are skipped.
-7. **Settlement:** Polymarket's official result from the CLOB API. The bot's own TWAP estimate is logged next to it as a check. If Polymarket hasn't resolved after 20 minutes, the model result is used.
+7. **Settlement:** Polymarket's official result, read on-chain from the Conditional Tokens contract. Markets resolve there about 60–100 s after they end; the CLOB API's `winner` flag lags by many minutes and is only a fallback. The bot's own TWAP estimate is logged next to the official result as a check.
 8. **Rebates (estimate):** yesterday's taker fees × your tier, credited after 00:00 UTC. Tiers use the documented 30-day weighted volume.
 
 ### Sizing and scaling ($200 → more)

@@ -7,13 +7,13 @@ import sqlite3
 from pathlib import Path
 
 BUCKETS = {
-    "momentum_bp": ([(-1e9, 0.5), (0.5, 1), (1, 2), (2, 4), (4, 1e9)], ["<0.5bp", "0.5–1", "1–2", "2–4", "≥4bp"]),
+    "dir_momentum_bp": ([(-1e9, 0.5), (0.5, 1), (1, 2), (2, 4), (4, 1e9)], ["<0.5bp", "0.5–1", "1–2", "2–4", "≥4bp"]),
     "edge": ([(-1e9, 0), (0, 0.02), (0.02, 0.05), (0.05, 0.1), (0.1, 1e9)], ["<0", "0–2¢", "2–5¢", "5–10¢", "≥10¢"]),
     "seconds_left": ([(0, 30), (30, 60), (60, 120), (120, 200), (200, 1e9)], ["<30s", "30–60s", "60–120s", "120–200s", "≥200s"]),
     "avg_price": ([(0, .2), (.2, .4), (.4, .6), (.6, .8), (.8, 1.01)], ["<0.2", "0.2–0.4", "0.4–0.6", "0.6–0.8", "≥0.8"]),
     "fair": ([(0, .3), (.3, .5), (.5, .7), (.7, .9), (.9, 1.01)], ["<0.3", "0.3–0.5", "0.5–0.7", "0.7–0.9", "≥0.9"]),
 }
-TITLES = {"momentum_bp": "By momentum at signal", "edge": "By edge at fill (after fee)",
+TITLES = {"dir_momentum_bp": "By momentum toward the side bought", "edge": "By edge at fill (after fee)",
           "seconds_left": "By time left in window", "avg_price": "By fill price",
           "fair": "Calibration: model fair value vs actual win rate"}
 
@@ -56,6 +56,8 @@ def load(data: Path, recent: int = 30) -> dict:
         f["won"] = None if s is None else (s["winner"] == f["outcome"])
         f["pnl"] = 0.0 if s is None else (f["shares"] if f["won"] else 0.0) - f["cash"]
         f.pop("levels", None)
+        m = f.get("momentum_bp")
+        f["dir_momentum_bp"] = None if m is None else (m if f["outcome"] == "Up" else -m)
     done = [f for f in fills if f["won"] is not None]
     notional = sum(f["notional"] for f in done)
     fees = sum(f["fee"] for f in done)

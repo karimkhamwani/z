@@ -105,6 +105,11 @@ class TestSettlementAndRebates(unittest.TestCase):
         self.assertAlmostEqual(r["pnl"], 0.0)
         self.assertAlmostEqual(pf.cash, 200.0)
 
+    def test_split_resolution_pays_half(self):
+        pf = Portfolio(cash=0, starting_equity=200, peak_equity=200)
+        pf.positions["c"] = Position("s", "c", 0, up_shares=10, down_shares=30, cost=15)
+        self.assertAlmostEqual(settle(pf, "c", "Split")["payout"], 20.0)
+
     def test_rebate_paid_next_day(self):
         pf = Portfolio(cash=0, starting_equity=200, peak_equity=200)
         pf.fees_by_day["2026-09-22"] = 10.0

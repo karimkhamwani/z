@@ -175,7 +175,7 @@ def settle(pf: Portfolio, condition_id: str, winner: str) -> dict | None:
     pos = pf.positions.pop(condition_id, None)
     if pos is None:
         return None
-    payout = pos.shares(winner)
+    payout = 0.5 * (pos.up_shares + pos.down_shares) if winner == "Split" else pos.shares(winner)
     pnl = payout - pos.cost
     pf.cash += payout
     pf.realized_pnl += pnl

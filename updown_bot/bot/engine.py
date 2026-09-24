@@ -186,14 +186,10 @@ class Engine:
             await asyncio.sleep(10)
             now = time.time()
             for cid, info in list(self.pending.items()):
-                if now < info["end"] + 15:
+                if now < info["end"] + 45:   # on-chain resolution lands ~60-100 s after the end
                     continue
                 self._model_winner(info)
-                winner, source = None, "official"
-                try:
-                    winner = await fetch_winner(cid)
-                except Exception as e:
-                    log.debug("resolution fetch failed for %s: %s", info["slug"], e)
+                winner, source = await fetch_winner(cid)
                 if winner is None and now > info["end"] + RESOLVE_GIVE_UP_S and info.get("model_winner"):
                     winner, source = info["model_winner"], "model_twap_fallback"
                 if winner is None:
