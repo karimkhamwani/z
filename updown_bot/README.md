@@ -137,6 +137,8 @@ Every live order's time is shown in the Orders panel as **sign + send**. From a 
 | Network round trip to Polymarket | ~130 ms from the US East Coast | **only improved by running the bot closer to Polymarket's servers** |
 | Polymarket's matching | the rest | fixed |
 
+Backtest the strategy on recent markets with `python manage.py backtest --minutes 120` (public data only; it shows the profit at several order latencies, so you can see how much speed matters).
+
 Measure your own path with `python manage.py latency`. It reports the Cloudflare edge, new vs warm connection times and signing speed. Polymarket's servers are commonly reported to be in AWS London (eu-west-2): run the tool on a small server there and compare the warm round trip before moving the bot.
 
 ### Before real money: know the gap

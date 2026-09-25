@@ -26,7 +26,8 @@ HERE = Path(__file__).resolve().parent
 VENV = HERE / ".venv"
 WINDOWS = os.name == "nt"
 VENV_PY = VENV / ("Scripts/python.exe" if WINDOWS else "bin/python")
-SCRIPTS = {"run": "run.py", "dashboard": "dashboard.py", "report": "report.py", "latency": "latency.py"}
+SCRIPTS = {"run": "run.py", "dashboard": "dashboard.py", "report": "report.py", "latency": "latency.py",
+           "backtest": "backtest.py"}
 PIP_HELP = """
 pip couldn't install the requirements (see the error above). Common fixes:
   * Behind a proxy: set it first, e.g.  set HTTPS_PROXY=http://proxy.company.com:8080  (Windows cmd)
