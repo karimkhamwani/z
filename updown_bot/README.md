@@ -123,6 +123,19 @@ Use `python manage.py run --live` under a service manager that restarts it: Task
 - **"No orders found to match" is normal:** a fill-and-kill order found nothing at your price. It now counts as a no-fill, not an error.
 - **The first order in a market used to take ~2 s** (the SDK loading market details); the bot now loads them as soon as a market appears. Other orders take ~0.6 s.
 
+### Latency: where it goes and how to cut it
+Every live order's time is shown in the Orders panel as **sign + send**. From a US machine the path looks like this:
+
+| Part | Typical | What the bot does |
+|---|---|---|
+| Reacting to a price move | ~0 ms | evaluates on every Coinbase tick (it used to check every 100 ms, ~50 ms average delay) |
+| Signing the order | 0.2 ms | uses the `coincurve` C library (pure Python took 3.5 ms) |
+| Opening a connection | ~100 ms if cold | avoided: the 15 s balance sync keeps the order connection warm (`sync_every_s` must stay under 30) |
+| Network round trip to Polymarket | ~130 ms from the US East Coast | **only improved by running the bot closer to Polymarket's servers** |
+| Polymarket's matching | the rest | fixed |
+
+Measure your own path with `python manage.py latency`. It reports the Cloudflare edge, new vs warm connection times and signing speed. Polymarket's servers are commonly reported to be in AWS London (eu-west-2): run the tool on a small server there and compare the warm round trip before moving the bot.
+
 ### Before real money: know the gap
 Paper assumed 300 ms latency and 50% of displayed size. Live competes with faster bots, so start with the small caps you've set and compare the Orders panel (fill rate, latency) and fills with your paper results before raising any limit. The bot's per-fill fee is an estimate from the published formula; the balance sync always reflects the real cash.
 
@@ -178,7 +191,8 @@ With the defaults, an order costs at most about $4.80 (5 shares at 95¢ plus fee
 
 ## Files
 ```
-manage.py         cross-platform launcher: setup | run | dashboard | report | test | certs
+manage.py         cross-platform launcher: setup | run | dashboard | report | test | preflight | latency | certs
+latency.py        measures network latency to Polymarket's order server from this machine
 *.bat             Windows double-click shortcuts for manage.py
 run.py            start the bot          report.py      terminal report (+ --csv)
 dashboard.py      local dashboard        config.toml    every tunable parameter

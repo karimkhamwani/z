@@ -28,6 +28,7 @@ class AssetPrices:
         self.chainlink = SecondBars()             # Chainlink prints keyed by their own second
         self.chainlink_local = PriceSeries()      # Chainlink prints keyed by local receive time (lag diagnostics)
         self.vol = EwmaVol(vol_halflife_s, vol_floor_bp, vol_change_s, vol_prior_bp)
+        self.tick = asyncio.Event()               # set on every spot tick: the signal loop reacts immediately
 
     def estimate_now(self, now: float, max_adjust: float | None = None) -> float | None:
         """Best estimate of the Chainlink price right now: last print + the Coinbase move since that print.
@@ -77,7 +78,9 @@ async def run_coinbase(assets: dict[str, AssetPrices], status: dict) -> None:
                     raw = await asyncio.wait_for(ws.recv(), timeout=STALE_S)  # TimeoutError → reconnect
                     m = json.loads(raw)
                     if m.get("type") == "ticker" and m.get("product_id") in products:
-                        products[m["product_id"]].spot.add(time.time(), float(m["price"]))
+                        ap = products[m["product_id"]]
+                        ap.spot.add(time.time(), float(m["price"]))
+                        ap.tick.set()
         except Exception as e:
             status["coinbase"] = f"down ({type(e).__name__})"
             log.warning("coinbase feed error: %s; reconnecting in %.0fs", e, backoff)

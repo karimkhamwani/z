@@ -146,6 +146,7 @@ class LiveExecutor:
         self.max_errors = max_consecutive_errors
         self.kill_switch = kill_switch
         self.errors = 0
+        self.timing: dict = {}
 
     def _order_row(self, market, outcome, amount, max_spend, limit, **kw) -> None:
         self.ledger.order({"ts": time.time(), "slug": market.slug, "condition_id": market.condition_id,
@@ -165,10 +166,9 @@ class LiveExecutor:
             return None
         token = market.token(outcome)
         t0 = time.time()
+        self.timing = {}
         try:
-            resp = await asyncio.wait_for(self.acct.client.place_market_order(
-                token_id=token, side="BUY", amount=f"{amount:.2f}", max_price=f"{limit:.4f}",
-                max_spend=f"{max_spend:.2f}", order_type="FAK"), timeout=self.timeout)
+            resp = await asyncio.wait_for(self._send(token, amount, max_spend, limit), timeout=self.timeout)
         except Exception as e:  # timeout / network: the order may or may not have reached the exchange
             latency = time.time() - t0
             if is_no_match(e):   # a definitive "nothing to fill against" — not an error, nothing to recover
@@ -202,15 +202,34 @@ class LiveExecutor:
             return None
         self.errors = 0
         making, taking = float(resp.making_amount), float(resp.taking_amount)
+        latency = self.timing.get("total_s", latency)
         usd, shares = (making, taking) if taking >= making else (taking, making)  # BUY below $1: shares > dollars
         if resp.status != "matched" and shares <= 0:
             usd, shares = await self._await_delayed(str(resp.order_id), limit)
         self._order_row(market, outcome, amount, max_spend, limit, ok=1, status=resp.status, code="",
                         message=f"order {resp.order_id} trades {len(resp.trade_ids)}", latency_s=latency,
-                        order_id=str(resp.order_id), filled_usd=usd, filled_shares=shares)
+                        order_id=str(resp.order_id), filled_usd=usd, filled_shares=shares,
+                        sign_ms=self.timing.get("sign_ms"), post_ms=self.timing.get("post_ms"))
         if shares <= 0:
             return None
         return self._record(market, outcome, shares, usd, context, latency)
+
+    async def _send(self, token: str, amount: float, max_spend: float, limit: float):
+        """Sign locally, then post — timed separately so the Orders panel shows where latency goes.
+        If the exchange reports a balance/allowance problem, retry once through place_market_order, which
+        lets the SDK repair a missing allowance."""
+        c = self.acct.client
+        kw = dict(token_id=token, side="BUY", amount=f"{amount:.2f}", max_price=f"{limit:.4f}",
+                  max_spend=f"{max_spend:.2f}", order_type="FAK")
+        t0 = time.perf_counter()
+        signed = await c.create_market_order(**kw)
+        t1 = time.perf_counter()
+        resp = await c.post_order(signed)
+        t2 = time.perf_counter()
+        self.timing = {"sign_ms": (t1 - t0) * 1000, "post_ms": (t2 - t1) * 1000, "total_s": t2 - t0}
+        if not resp.ok and resp.code == "not_enough_balance":
+            resp = await c.place_market_order(**kw)
+        return resp
 
     async def _await_delayed(self, order_id: str, limit: float, wait_s: float = 8.0) -> tuple[float, float]:
         """A `delayed`/`live` FAK hasn't matched yet: poll it, then cancel whatever is left."""

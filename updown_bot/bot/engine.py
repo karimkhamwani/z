@@ -164,10 +164,23 @@ class Engine:
                           realized=p.chainlink, sigma=sigma, basis_sigma=self.cfg.model.basis_sigma_usd)
 
     # ---------- trading ----------
+    async def _next_tick(self) -> None:
+        """Wake on the next Coinbase tick (the momentum source) or after 100 ms, whichever comes first.
+        Polling every 100 ms added ~50 ms of average reaction delay before an order could be sent."""
+        events = [p.tick for p in self.prices.values()]
+        waiters = [asyncio.create_task(e.wait()) for e in events]
+        try:
+            await asyncio.wait(waiters, timeout=0.1, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for w in waiters:
+                w.cancel()
+            for e in events:
+                e.clear()
+
     async def signal_loop(self) -> None:
         sc = self.cfg.strategy
         while True:
-            await asyncio.sleep(0.1)
+            await self._next_tick()
             now = time.time()
             if self.risk.check_breakers() or self._live_blocked(now):
                 continue

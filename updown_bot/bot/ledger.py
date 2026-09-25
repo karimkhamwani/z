@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS rebates (day TEXT, fees REAL, wv_30d REAL, rate REAL,
 CREATE TABLE IF NOT EXISTS events (ts REAL, kind TEXT, detail TEXT);
 CREATE TABLE IF NOT EXISTS orders (
   ts REAL, slug TEXT, condition_id TEXT, outcome TEXT, amount REAL, max_spend REAL, max_price REAL, ok INTEGER,
-  status TEXT, code TEXT, message TEXT, latency_s REAL, order_id TEXT, filled_usd REAL, filled_shares REAL);
+  status TEXT, code TEXT, message TEXT, latency_s REAL, order_id TEXT, filled_usd REAL, filled_shares REAL,
+  sign_ms REAL, post_ms REAL);
 CREATE TABLE IF NOT EXISTS account (
   ts REAL, cash REAL, positions_value REAL, equity REAL, open_positions INTEGER, redeemable INTEGER, raw_balance INTEGER);
 CREATE INDEX IF NOT EXISTS ix_snap ON snapshots(slug, ts);
@@ -36,7 +37,16 @@ class Ledger:
         self.db = sqlite3.connect(path)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
+        self._migrate()
         self._dirty = False
+
+    def _migrate(self) -> None:
+        """Add columns introduced after a ledger was created (CREATE TABLE IF NOT EXISTS won't)."""
+        cols = {r[1] for r in self.db.execute("PRAGMA table_info(orders)")}
+        for name in ("sign_ms", "post_ms"):
+            if name not in cols:
+                self.db.execute(f"ALTER TABLE orders ADD COLUMN {name} REAL")
+        self.db.commit()
 
     def _ins(self, table: str, row: dict) -> None:
         cols = ",".join(row)

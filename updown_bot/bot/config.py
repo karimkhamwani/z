@@ -56,7 +56,7 @@ class Strategy:
 class Execution:
     latency_ms: float = 700
     liquidity_haircut: float = 0.5
-    max_slippage: float = 0.02
+    max_slippage: float = 0.05
     fee_rate: float = 0.07
 
 
@@ -146,6 +146,9 @@ def load_config(path: str | Path) -> Config:
     if r.max_shares_per_order and r.max_shares_per_order < r.min_shares:
         raise ValueError(f"risk.max_shares_per_order ({r.max_shares_per_order}) is below risk.min_shares ({r.min_shares}); "
                          "Polymarket's minimum order is 5 shares, so no order could ever be placed")
+    if cfg.live.sync_every_s >= 30:
+        raise ValueError("live.sync_every_s must be under 30: the balance sync keeps the order connection warm, "
+                         "and the SDK closes connections idle for 30 s (a cold connection adds ~100 ms per order)")
     if r.daily_loss_stop_basis not in ("initial", "day_start"):
         raise ValueError('risk.daily_loss_stop_basis must be "initial" or "day_start"')
     if r.max_market_usd and r.max_market_usd < r.min_shares * 1.0:

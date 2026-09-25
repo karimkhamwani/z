@@ -39,14 +39,24 @@ class FakeClient:
         self.positions = list(positions)
         self.cancelled = 0
 
-    async def place_market_order(self, **kw):
-        self.calls.append(kw)
+    async def _next(self):
         r = self.responses.pop(0)
         if isinstance(r, Exception):
             raise r
         if r == "hang":
             await REAL_SLEEP(10)
         return r
+
+    async def create_market_order(self, **kw):      # sign (local)
+        self.calls.append(kw)
+        return {"signed": kw}
+
+    async def post_order(self, signed):             # send
+        return await self._next()
+
+    async def place_market_order(self, **kw):       # fallback path (allowance recovery)
+        self.fallback_calls = getattr(self, "fallback_calls", 0) + 1
+        return await self._next()
 
     async def get_order(self, order_id):
         return NS(size_matched="5", status="MATCHED")
@@ -126,10 +136,24 @@ class TestLiveExecutor(unittest.TestCase):
         self.assertEqual(ex.errors, 0)
         self.assertEqual(pf.positions, {})
 
-    def test_insufficient_balance_halts(self):
-        ex, *_ = make(FakeClient([rejected("not_enough_balance", "not enough balance / allowance")]))
+    def test_insufficient_balance_retries_once_then_halts(self):
+        client = FakeClient([rejected("not_enough_balance", "x"), rejected("not_enough_balance", "still")])
+        ex, *_ = make(client)
         with self.assertRaises(HaltTrading):
             buy(ex)
+        self.assertEqual(client.fallback_calls, 1)                  # one retry via the SDK's allowance repair
+
+    def test_allowance_repaired_on_retry(self):
+        client = FakeClient([rejected("not_enough_balance", "x"), accepted("3.00", "5")])
+        ex, pf, _ = make(client)
+        self.assertAlmostEqual(buy(ex).shares, 5)
+
+    def test_sign_and_send_times_are_recorded(self):
+        ex, pf, led = make(FakeClient([accepted("3.00", "5")]))
+        buy(ex)
+        row = led.orders[-1]
+        self.assertIsNotNone(row["sign_ms"]); self.assertIsNotNone(row["post_ms"])
+        self.assertGreaterEqual(row["latency_s"] * 1000, row["post_ms"])
 
     def test_repeated_errors_halt(self):
         ex, *_ = make(FakeClient([rejected("unknown")] * 3), max_errors=3)
@@ -168,6 +192,22 @@ class TestLiveExecutor(unittest.TestCase):
         self.assertAlmostEqual(fill.shares, 5)
         self.assertAlmostEqual(fill.avg_price, 0.62)             # conservative: worst allowed price
         self.assertEqual(client.cancelled, 1)
+
+
+class TestLedgerMigration(unittest.TestCase):
+    def test_old_ledger_gets_new_columns(self):
+        import sqlite3
+        from bot.ledger import Ledger
+        d = Path(tempfile.mkdtemp())
+        db = sqlite3.connect(d / "paper.db")        # an orders table from before sign_ms/post_ms existed
+        db.execute("CREATE TABLE orders (ts REAL, slug TEXT, condition_id TEXT, outcome TEXT, amount REAL, max_spend REAL, "
+                   "max_price REAL, ok INTEGER, status TEXT, code TEXT, message TEXT, latency_s REAL, order_id TEXT, "
+                   "filled_usd REAL, filled_shares REAL)")
+        db.commit(); db.close()
+        led = Ledger(d / "paper.db")
+        led.order({"ts": 1.0, "slug": "s", "sign_ms": 0.3, "post_ms": 480.0})
+        led.commit()
+        self.assertEqual(led.db.execute("select post_ms from orders").fetchone()[0], 480.0)
 
 
 class TestShadow(unittest.TestCase):

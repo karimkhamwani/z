@@ -6,6 +6,7 @@
     python manage.py report [--csv]
     python manage.py test
     python manage.py preflight             live account check: keys, wallet type, balance, positions (no orders)
+    python manage.py latency               network latency to Polymarket's order server from this machine
     python manage.py run --live            real-money trading (also needs mode = "live" in config.toml)
     python manage.py dashboard             follows config.toml's mode (paper → data/, shadow/live → data_live/)
     python manage.py dashboard --paper     force the paper ledger  (--live forces data_live/)
@@ -25,7 +26,7 @@ HERE = Path(__file__).resolve().parent
 VENV = HERE / ".venv"
 WINDOWS = os.name == "nt"
 VENV_PY = VENV / ("Scripts/python.exe" if WINDOWS else "bin/python")
-SCRIPTS = {"run": "run.py", "dashboard": "dashboard.py", "report": "report.py"}
+SCRIPTS = {"run": "run.py", "dashboard": "dashboard.py", "report": "report.py", "latency": "latency.py"}
 PIP_HELP = """
 pip couldn't install the requirements (see the error above). Common fixes:
   * Behind a proxy: set it first, e.g.  set HTTPS_PROXY=http://proxy.company.com:8080  (Windows cmd)

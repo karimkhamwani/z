@@ -3,3 +3,5 @@ websockets>=13,<18
 certifi>=2024.2.2
 # Official Polymarket SDK — used only by shadow/live modes. Pre-1.0: pinned to the tested minor version.
 polymarket-client>=0.11,<0.12
+# C secp256k1 backend: order signing 3.5 ms → 0.2 ms (eth-keys picks it up automatically). Prebuilt wheels on all platforms.
+coincurve>=20

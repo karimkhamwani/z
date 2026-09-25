@@ -45,7 +45,7 @@ max_orders_per_market = 30
 [execution]
 latency_ms = 700               # paper: re-read the book this long after the signal (live measured ~0.6 s, first order 2 s)
 liquidity_haircut = 0.5        # paper: assume only this fraction of displayed size is really available
-max_slippage = 0.02            # limit = ask + this (never above fair − fee − min_edge)
+max_slippage = 0.05            # limit = ask + this, but never above fair − fee − min_edge (edge stays protected)
 fee_rate = 0.07                # crypto taker fee: rate × shares × p × (1 − p)
 
 [risk]
@@ -64,7 +64,7 @@ estimate_taker_rebates = true  # credit paper taker rebates by tier (from paper 
 
 [live]                         # used by mode = "shadow" and "live"
 data_dir = "data_live"         # separate ledger from paper trading
-sync_every_s = 15              # read the portfolio balance (pUSD cash + positions value) this often; equity = that balance
+sync_every_s = 15              # balance sync (equity = pUSD cash + positions). Keep < 30: it also keeps the order connection warm
 redeem_winnings = true         # claim resolved winnings automatically (proxy/Safe/deposit wallets need a Relayer API key)
 cancel_all_on_start = true     # cancel resting orders at start and shutdown (the bot itself never leaves any)
 order_timeout_s = 10           # give up waiting for an order response after this (then checks for fills)

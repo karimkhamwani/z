@@ -471,7 +471,7 @@ const ORDER_COLS = [
   {h: "result", f: r => { const k = r.code || r.status; const good = r.status === "matched" && r.filled_shares > 0;
       return `<span class="chip ${good ? "up" : (r.ok ? "" : "down")}">${k}</span>`; }},
   {h: "filled", n: 1, f: r => r.filled_shares ? `${Number(r.filled_shares).toFixed(2)} sh / ${usd(r.filled_usd)}` : "—"},
-  {h: "latency", n: 1, f: r => r.latency_s ? Math.round(r.latency_s * 1000) + " ms" : "—"},
+  {h: "latency", n: 1, f: r => r.latency_s ? Math.round(r.latency_s * 1000) + " ms" + (r.post_ms != null ? ` <span class="muted">(sign ${r.sign_ms.toFixed(0)} + send ${r.post_ms.toFixed(0)})</span>` : "") : "—"},
   {h: "detail", f: r => `<span class="muted">${(r.message || "").slice(0, 80)}</span>`}
 ];
 async function loadOrders() {
