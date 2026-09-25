@@ -1,5 +1,6 @@
 """Regression tests for the fixes that came out of the first live session (Sep 24, 19:40–19:55)."""
 import asyncio
+import json
 import time
 import unittest
 from types import SimpleNamespace as NS
@@ -266,6 +267,69 @@ class TestNoBlockingStatusWrite(unittest.TestCase):
                     mock.patch("time.sleep") as slept:
                 atomic_write_text(target, "{}", retries=1)
             slept.assert_not_called()
+
+
+class TestBinanceSource(unittest.TestCase):
+    def prices(self, source, now):
+        p = AssetPrices("btc", 600, 0.2)
+        p.source = source
+        p.spot.add(now - 3.0, 84000.0)                 # Coinbase: +2 bp over 3 s
+        p.spot.add(now - 0.1, 84016.8)
+        p.binance.add(now - 3.0, 84040.0)              # Binance (USDT, different level): +4 bp over 3 s
+        p.binance.add(now - 0.1, 84073.6)
+        return p
+
+    def test_binance_message_updates_its_series(self):
+        from bot.feeds import apply_binance
+        p = AssetPrices("btc", 600, 0.2)
+        raw = json.dumps({"stream": "btcusdt@aggTrade", "data": {"e": "aggTrade", "s": "BTCUSDT", "p": "84012.5", "T": 1}})
+        self.assertIs(apply_binance({"btcusdt": p}, raw, 1000.0), p)
+        self.assertEqual(p.binance.last(), (1000.0, 84012.5))
+        self.assertIsNone(apply_binance({"btcusdt": p}, json.dumps({"result": None, "id": 1}), 1000.0))
+
+    def test_source_picks_the_exchange(self):
+        now = 1000.0
+        self.assertAlmostEqual(self.prices("coinbase", now).momentum_bp(3, now), 2.0, places=1)
+        self.assertAlmostEqual(self.prices("binance", now).momentum_bp(3, now), 4.0, places=1)
+        self.assertAlmostEqual(self.prices("both", now).momentum_bp(3, now), 2.0, places=1)   # the smaller agreeing move
+
+    def test_both_needs_agreement(self):
+        now = 1000.0
+        p = self.prices("both", now)
+        p.binance.add(now - 0.05, 83990.0)             # Binance now down over 3 s, Coinbase up
+        self.assertEqual(p.momentum_bp(3, now), 0.0)
+
+    def test_quiet_source_falls_back_to_the_other(self):
+        now = 1000.0
+        p = AssetPrices("btc", 600, 0.2)
+        p.source = "binance"
+        p.binance.add(now - 30, 84000.0)               # Binance silent for 30 s
+        p.spot.add(now - 3.0, 84000.0)
+        p.spot.add(now - 0.1, 84016.8)
+        self.assertAlmostEqual(p.momentum_bp(3, now), 2.0, places=1)
+
+    def test_estimate_uses_the_source_move_not_its_price_level(self):
+        now = 1000.0
+        p = AssetPrices("btc", 600, 0.2)
+        p.source = "binance"
+        p.chainlink.add(int(now) - 2, 84005.0)
+        p.binance.add(now - 1.5, 84050.0)              # Binance price during the Chainlink second (USDT level)
+        p.binance.add(now - 0.1, 84073.6)
+        p.spot.add(now - 0.1, 84500.0)                 # Coinbase is ignored with source = "binance"
+        self.assertAlmostEqual(p.estimate_now(now), 84005.0 + (84073.6 - 84050.0), places=6)
+
+    def test_config_rejects_a_source_without_its_feed(self):
+        import tempfile
+        from pathlib import Path
+        from bot.config import load_config
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d) / "c.toml"
+            cfg.write_text('[feeds]\nbinance = false\nmomentum_source = "binance"\n')
+            with self.assertRaises(ValueError):
+                load_config(cfg)
+            cfg.write_text('[feeds]\nmomentum_source = "kraken"\n')
+            with self.assertRaises(ValueError):
+                load_config(cfg)
 
 
 if __name__ == "__main__":

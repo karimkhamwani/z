@@ -3,11 +3,15 @@
     python manage.py backtest                  # last 20 minutes = the 4 most recent resolved markets
     python manage.py backtest --minutes 120    # longer = more markets = a more reliable answer
     python manage.py backtest --minutes 480 --set strategy.min_edge=0.04   # try a setting without editing config
+    python manage.py backtest --minutes 480 --compare-sources   # Coinbase vs Binance vs both as the signal source
 
 It runs the bot's own model (bot/model.py) and signal rules (bot/strategy.py) with the settings in config.toml.
 
 Data
   • Coinbase BTC-USD: every trade, millisecond timestamps → momentum, trend, volatility, the price estimate.
+  • Binance BTC/USDT: every aggregated trade (when feeds.momentum_source uses Binance, or with --compare-sources).
+    Both are keyed by the exchange's own clock, so this compares how good each signal is, not how fast each price
+    reaches your PC — measure that with `python manage.py leadlag`.
   • Polymarket: each market's official start price ("price to beat") and final price → reference and winner,
     exact. Chainlink itself has no public history, so the Chainlink series is rebuilt as Coinbase + the offset
     between the two at the market's start, lagging 2 s (the median lag measured live).
@@ -26,6 +30,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import bisect
+import copy
 import datetime as dt
 import json
 import math
@@ -40,7 +46,8 @@ sys.path.insert(0, str(HERE))
 
 from bot.book import Book  # noqa: E402
 from bot.config import load_config  # noqa: E402
-from bot.model import EwmaVol, PriceSeries, SecondBars, fair_value, taker_fee_per_share  # noqa: E402
+from bot.feeds import SOURCES, AssetPrices  # noqa: E402
+from bot.model import PriceSeries, SecondBars, fair_value, taker_fee_per_share  # noqa: E402
 from bot.net import get_json, ssl_context  # noqa: E402
 from bot.strategy import evaluate  # noqa: E402
 
@@ -166,6 +173,41 @@ async def fetch_coinbase(since: float) -> list[tuple[float, float]]:
     return [x for x in trades if x[0] >= since]
 
 
+BINANCE_REST = "https://data-api.binance.vision"   # Binance's market-data host: works where binance.com is blocked
+
+
+async def _binance_hour(h: int) -> list[tuple[float, float]]:
+    """All BTC/USDT aggregated trades in the hour starting at unix time h (cached once the hour is over)."""
+    path = CACHE / f"binance_BTCUSDT_{h}.json"
+    try:
+        return [tuple(x) for x in json.loads(path.read_text(encoding="utf-8"))]
+    except (OSError, ValueError):
+        pass
+    out: list[tuple[float, float]] = []
+    url = f"{BINANCE_REST}/api/v3/aggTrades?symbol=BTCUSDT&limit=1000"
+    page = await polite_get(f"{url}&startTime={h * 1000}&endTime={(h + 3600) * 1000 - 1}")
+    while page:
+        out += [(t["T"] / 1000, float(t["p"])) for t in page if t["T"] < (h + 3600) * 1000]
+        if len(page) < 1000 or page[-1]["T"] >= (h + 3600) * 1000:
+            break
+        page = await polite_get(f"{url}&fromId={page[-1]['a'] + 1}")
+    if time.time() > h + 3600 + 600:
+        CACHE.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(out), encoding="utf-8")
+    return out
+
+
+async def fetch_binance(since: float, until: float) -> list[tuple[float, float]]:
+    hours = range(int(since) // 3600 * 3600, int(until) + 1, 3600)
+    sem = asyncio.Semaphore(PARALLEL)
+
+    async def one(h):
+        async with sem:
+            return await _binance_hour(h)
+    parts = await asyncio.gather(*(one(h) for h in hours))
+    return sorted(x for part in parts for x in part if since <= x[0] <= until)
+
+
 # ---------------------------------------------------------------- simulation
 def second_closes(trades: list[tuple[float, float]]) -> dict[int, float]:
     closes: dict[int, float] = {}
@@ -187,18 +229,24 @@ def ask_at(m: Mkt, side: str, sec: int, max_back: int) -> tuple[float | None, in
     return None, None
 
 
-def simulate(cfg, markets: list[Mkt], trades, closes, latency: float | None) -> dict:
+def simulate(cfg, markets: list[Mkt], trades, closes, latency: float | None, binance=None) -> dict:
     sc, rk = cfg.strategy, cfg.risk
     fee_rate, tick, slip = cfg.execution.fee_rate, 0.01, cfg.execution.max_slippage
     res = {"signals": 0, "fills": [], "missed": 0, "unknown_book": 0}
     equity = cfg.account.starting_equity
     for m in markets:
-        vol = EwmaVol(cfg.model.vol_halflife_s, cfg.model.vol_floor_bp, cfg.model.vol_change_s, cfg.model.vol_prior_bp)
-        spot = PriceSeries(max_age_s=3600)
-        bars = SecondBars()
+        # the bot's own price object: the same source choice, momentum, trend and estimate code as live
+        ap = AssetPrices("btc", cfg.model.vol_halflife_s, cfg.model.vol_floor_bp, cfg.model.vol_change_s,
+                         cfg.model.vol_prior_bp)
+        ap.source = cfg.feeds.momentum_source
+        ap.spot, ap.binance = PriceSeries(max_age_s=3600), PriceSeries(max_age_s=3600)
+        bars = ap.chainlink = SecondBars()
+        vol = ap.vol
         basis = m.ref - sum(closes[s] for s in range(m.start - 59, m.start + 1)) / 60   # Chainlink − Coinbase
         vol_sec = min(closes)
-        i = 0
+        bn = binance or []
+        i = bisect.bisect_left(trades, (m.start - 120,))
+        j = bisect.bisect_left(bn, (m.start - 120,))
         spent = 0.0
         last_sent: dict[str, float] = {}
         busy_until: dict[str, float] = {}
@@ -206,8 +254,11 @@ def simulate(cfg, markets: list[Mkt], trades, closes, latency: float | None) -> 
         t = m.start + sc.min_seconds_elapsed
         while t < m.end - sc.min_seconds_left:
             while i < len(trades) and trades[i][0] <= t:
-                spot.add(*trades[i])
+                ap.spot.add(*trades[i])
                 i += 1
+            while j < len(bn) and bn[j][0] <= t:
+                ap.binance.add(*bn[j])
+                j += 1
             cl_sec = int(t) - CHAINLINK_LAG_S
             while vol_sec <= cl_sec:
                 vol.update(vol_sec, closes[vol_sec])      # 30 s changes: the offset doesn't matter
@@ -219,10 +270,8 @@ def simulate(cfg, markets: list[Mkt], trades, closes, latency: float | None) -> 
                 continue
             cl_val = bars.v[cl_sec]
             sigma = vol.sigma(cl_val)
-            spot_now, spot_then = spot.last()[1], spot.at(cl_sec + 0.999)
-            move = spot_now - spot_then if spot_then else 0.0
             cap = cfg.model.max_spot_adjust_sigma * sigma * math.sqrt(t - cl_sec + 1)
-            x = cl_val + max(-cap, min(cap, move))
+            x = ap.estimate_now(t, max_adjust=cap)
             fv = fair_value(reference=m.ref, x_now=x, now_sec=int(t), end_sec=m.end, lookback=60, realized=bars,
                             sigma=sigma, basis_sigma=cfg.model.basis_sigma_usd)
             books = {}
@@ -234,9 +283,9 @@ def simulate(cfg, markets: list[Mkt], trades, closes, latency: float | None) -> 
                     b.asks = {p: 1e9}
                     b.updated = sec + 1.0
                 books[side] = b
-            intent, _ = evaluate(sc, p_up=fv.p_up, momentum_bp=spot.move_bp(sc.momentum_window_s, t), books=books,
+            intent, _ = evaluate(sc, p_up=fv.p_up, momentum_bp=ap.momentum_bp(sc.momentum_window_s, t), books=books,
                                  now=t, seconds_left=m.end - t, seconds_elapsed=t - m.start, fee_rate=fee_rate,
-                                 tick=tick, max_slippage=slip, trend_bp=spot.move_bp(sc.trend_window_s, t))
+                                 tick=tick, max_slippage=slip, trend_bp=ap.move_bp(sc.trend_window_s, t))
             if intent is None or t < busy_until.get(intent.outcome, 0) or \
                     t - last_sent.get(intent.outcome, -99) < sc.side_cooldown_s or n_fills >= sc.max_orders_per_market:
                 t = t_next
@@ -292,6 +341,8 @@ def main() -> None:
     ap.add_argument("--fills", action="store_true", help="list every simulated fill")
     ap.add_argument("--set", action="append", default=[], metavar="SECTION.KEY=VALUE",
                     help="try a setting without editing config.toml, e.g. --set strategy.min_edge=0.04 (repeatable)")
+    ap.add_argument("--compare-sources", action="store_true",
+                    help="run Coinbase, Binance and both (must agree) as the signal source, side by side")
     args = ap.parse_args()
     cfg = load_config(args.config)
     for item in args.set:
@@ -320,24 +371,47 @@ def main() -> None:
         await asyncio.gather(*(one(m) for m in todo))
         print(f"Loading Coinbase BTC trades since {WARMUP_S // 60} min before the first market …")
         trades = await fetch_coinbase(markets[0].start - WARMUP_S)
-        return markets, trades
-    markets, trades = asyncio.run(load())
+        binance = None
+        if args.compare_sources or cfg.feeds.momentum_source != "coinbase":
+            print("Loading Binance BTC/USDT trades …")
+            binance = await fetch_binance(markets[0].start - WARMUP_S, markets[-1].end)
+        return markets, trades, binance
+    markets, trades, binance = asyncio.run(load())
     closes = second_closes(trades)
 
     print(f"\n{'market (UTC)':14} {'start price':>12} {'final':>12}  winner  Polymarket trades")
     for m in markets:
         print(f"{time.strftime('%H:%M', time.gmtime(m.start))}-{time.strftime('%H:%M', time.gmtime(m.end))}    "
               f"{m.ref:12,.2f} {m.final:12,.2f}  {m.winner:6}  {m.n_trades:,}")
-    print(f"Coinbase: {len(trades):,} trades")
+    print(f"Coinbase: {len(trades):,} trades" + (f"   Binance: {len(binance):,} trades" if binance else ""))
     print(f"Settings: {cfg.risk.max_shares_per_order:g} shares/order, ${cfg.risk.max_market_usd:g}/market cap, "
           f"min edge {cfg.strategy.min_edge * 100:.0f}c, max edge {cfg.strategy.max_edge * 100:.0f}c, "
-          f"momentum ≥ {cfg.strategy.min_momentum_bp} bp over {cfg.strategy.momentum_window_s:g} s")
+          f"momentum ≥ {cfg.strategy.min_momentum_bp} bp over {cfg.strategy.momentum_window_s:g} s, "
+          f"signal source {'compared' if args.compare_sources else cfg.feeds.momentum_source}")
+
+    if args.compare_sources:
+        print(f"\n{'signal source':14} {'latency':8} {'orders':>6} {'filled':>7} {'fill %':>7} {'won':>6} {'P&L':>9} "
+              f"{'per share':>10}")
+        for src in SOURCES:
+            c = copy.deepcopy(cfg)
+            c.feeds.momentum_source = src
+            for label, lat in LATENCIES:
+                r = simulate(c, markets, trades, closes, lat, binance)
+                f = r["fills"]
+                sh = sum(x["shares"] for x in f)
+                pnl = sum(x["pnl"] for x in f)
+                print(f"{src:14} {label:8} {r['signals']:6d} {len(f):7d} {len(f) / max(r['signals'], 1):7.0%} "
+                      f"{sum(x['won'] for x in f) / max(len(f), 1):6.0%} {pnl:+9.2f} {pnl / sh * 100 if sh else 0:+9.1f}c")
+            print()
+        print("Prices are keyed by each exchange's own clock: this compares signal quality. Which price reaches "
+              "your PC first\nis a separate question — measure it there with `python manage.py leadlag`.")
+        return
 
     print(f"\n{'order latency':14} {'orders':>6} {'filled':>7} {'fill %':>7} {'won':>7} {'spent':>8} {'P&L':>8} "
           f"{'per share':>10}  {'model expected':>14}")
     results = {}
     for label, lat in LATENCIES:
-        r = simulate(cfg, markets, trades, closes, lat)
+        r = simulate(cfg, markets, trades, closes, lat, binance)
         results[label] = r
         f = r["fills"]
         sh = sum(x["shares"] for x in f)

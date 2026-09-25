@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .book import BookFeed
 from .config import Config
-from .feeds import AssetPrices, run_chainlink, run_coinbase
+from .feeds import AssetPrices, run_binance, run_chainlink, run_coinbase
 from .ledger import Ledger
 from .markets import Market, TF_SECONDS, fetch_market, fetch_winner, window_start
 from .model import fair_value
@@ -46,9 +46,11 @@ class Engine:
         # live/shadow: starting capital = the real portfolio balance at the first sync (set in account_loop)
         self.needs_initial_equity = self.mode != "paper" and (fresh or not self.state_path.exists())
         self.ledger = Ledger(self.data / "paper.db")
-        self.status: dict[str, str] = {"coinbase": "off", "chainlink": "connecting", "clob": "connecting"}
+        self.status: dict[str, str] = {"coinbase": "off", "binance": "off", "chainlink": "connecting", "clob": "connecting"}
         self.prices = {a: AssetPrices(a, cfg.model.vol_halflife_s, cfg.model.vol_floor_bp, cfg.model.vol_change_s,
                                   cfg.model.vol_prior_bp) for a in cfg.markets.assets}
+        for p in self.prices.values():
+            p.source = cfg.feeds.momentum_source
         self._restore_vol()
         self.books = BookFeed(self.status)
         self.risk = RiskManager(cfg.risk, self.pf)
@@ -209,7 +211,7 @@ class Engine:
                 p = self.prices[m.asset]
                 mom = p.momentum_bp(sc.momentum_window_s, now)
                 books = {"Up": self.books.book(m.up_token), "Down": self.books.book(m.down_token)}
-                trend = p.spot.move_bp(sc.trend_window_s, now) if sc.max_counter_trend_bp else None
+                trend = p.move_bp(sc.trend_window_s, now) if sc.max_counter_trend_bp else None
                 intent, rejs = evaluate(sc, p_up=fv.p_up, momentum_bp=mom, books=books, now=now,
                                         seconds_left=m.end - now, seconds_elapsed=now - m.start,
                                         fee_rate=m.fee_rate, tick=m.tick, max_slippage=self.cfg.execution.max_slippage,
@@ -394,6 +396,7 @@ class Engine:
                     "ts": now, "slug": m.slug, "seconds_left": m.end - now, "reference": self.refs.get(m.slug),
                     "x_now": p.estimate_now(now), "chainlink": p.chainlink.v.get(cl_last) if cl_last else None,
                     "spot": spot[1] if spot else None, "sigma": p.vol.sigma(spot[1]) if spot else None,
+                    "binance": bn[1] if (bn := p.binance.last()) else None,
                     "p_up": fv.p_up if fv else None,
                     "up_bid": ub.best_bid() if ub else None, "up_ask": ub.best_ask() if ub else None,
                     "down_bid": db_.best_bid() if db_ else None, "down_ask": db_.best_ask() if db_ else None,
@@ -423,6 +426,7 @@ class Engine:
                 "seconds_left": m.end - now, "reference": self.refs.get(m.slug), "x_now": p.estimate_now(now),
                 "chainlink": p.chainlink.v.get(cl) if cl else None, "chainlink_age_s": now - cl if cl else None,
                 "spot": spot[1] if spot else None, "sigma": p.vol.sigma(spot[1]) if spot else None,
+                "binance": bn[1] if (bn := p.binance.last()) else None, "momentum_source": p.source,
                 "p_up": fv.p_up if fv else None, "sd_final": fv.sd_final if fv else None,
                 "up_bid": ub.best_bid() if ub else None, "up_ask": ua,
                 "down_bid": db_.best_bid() if db_ else None, "down_ask": da,
@@ -482,9 +486,9 @@ class Engine:
                 if ub and ub.best_ask():
                     fvs[-1] += f" ask_up={ub.best_ask():.2f}"
             log.info("equity %.2f (cash %.2f, open %.2f) | realized %+.2f | rebates %.2f | tier %.0f%% | "
-                     "fills %d, settled %d, pending %d | feeds cb=%s cl=%s clob=%s | %s%s",
+                     "fills %d, settled %d, pending %d | feeds cb=%s bn=%s cl=%s clob=%s | %s%s",
                      pf.equity, pf.cash, pf.open_cost, pf.realized_pnl, pf.rebates_total, tier * 100,
-                     self.stats["fills"], self.stats["settled"], len(self.pending), self.status["coinbase"],
+                     self.stats["fills"], self.stats["settled"], len(self.pending), self.status["coinbase"], self.status["binance"],
                      self.status["chainlink"], self.status["clob"], " ".join(fvs) or "no active market",
                      f" | HALTED: {pf.halted}" if pf.halted else "")
 
@@ -498,6 +502,8 @@ class Engine:
                  self.settle_loop(), self.snapshot_loop(), self.status_loop(), LOOP.run()]
         if self.cfg.feeds.coinbase:
             coros.append(run_coinbase(self.prices, self.status))
+        if self.cfg.feeds.binance:
+            coros.append(run_binance(self.prices, self.status))
         if self.account is not None:
             coros.append(self.account_loop())
         tasks = [asyncio.create_task(c) for c in coros]

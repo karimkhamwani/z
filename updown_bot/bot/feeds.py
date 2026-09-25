@@ -1,4 +1,5 @@
-"""Live price feeds: Coinbase ticker (fast, leading) and Polymarket RTDS Chainlink (the settlement series)."""
+"""Live price feeds: Coinbase ticker and Binance trades (fast, leading) and Polymarket RTDS Chainlink (the
+settlement series). `feeds.momentum_source` picks which exchange drives the signal."""
 from __future__ import annotations
 
 import asyncio
@@ -15,7 +16,11 @@ log = logging.getLogger("feeds")
 
 COINBASE_WS = "wss://ws-feed.exchange.coinbase.com"
 RTDS_WS = "wss://ws-live-data.polymarket.com"
+BINANCE_WS = ["wss://stream.binance.com:9443/stream?streams=",       # main site (blocked in some countries)
+              "wss://data-stream.binance.vision/stream?streams="]   # Binance's market-data-only host (works there)
 STALE_S = 10  # reconnect a feed that has been silent this long
+FRESH_S = 5   # an exchange price older than this isn't used for the signal or the estimate
+SOURCES = ("coinbase", "binance", "both")
 
 
 class AssetPrices:
@@ -27,8 +32,29 @@ class AssetPrices:
         self.spot = PriceSeries()                 # Coinbase trades/ticker, keyed by local receive time
         self.chainlink = SecondBars()             # Chainlink prints keyed by their own second
         self.chainlink_local = PriceSeries()      # Chainlink prints keyed by local receive time (lag diagnostics)
+        self.binance = PriceSeries()              # Binance BTC/USDT trades, keyed by local receive time
         self.vol = EwmaVol(vol_halflife_s, vol_floor_bp, vol_change_s, vol_prior_bp)
-        self.tick = asyncio.Event()               # set on every spot tick: the signal loop reacts immediately
+        self.tick = asyncio.Event()               # set on every signal-source tick: the signal loop reacts immediately
+        self.source = "coinbase"                  # which exchange drives momentum, trend and the estimate
+
+    def fast(self, now: float) -> list[PriceSeries]:
+        """The exchange series behind the signal. If the chosen one has gone quiet, the other takes over, so a
+        dropped feed doesn't stop trading; with neither fresh the caller falls back to Chainlink."""
+        chosen = {"coinbase": [self.spot], "binance": [self.binance], "both": [self.spot, self.binance]}[self.source]
+        fresh = lambda s: (last := s.last()) is not None and now - last[0] <= FRESH_S
+        live = [s for s in chosen if fresh(s)]
+        return live or [s for s in (self.spot, self.binance) if s not in chosen and fresh(s)]
+
+    def move_bp(self, window_s: float, now: float) -> float | None:
+        """Price move over the window (bp) on the signal source. With "both", the two exchanges must agree on the
+        direction; the smaller move counts, and disagreement counts as no move."""
+        moves = [m for s in self.fast(now) if (m := s.move_bp(window_s, now)) is not None]
+        if not moves:
+            return None
+        if len(moves) == 1:
+            return moves[0]
+        a, b = moves
+        return min(a, b, key=abs) if a * b > 0 else 0.0
 
     def estimate_now(self, now: float, max_adjust: float | None = None) -> float | None:
         """Best estimate of the Chainlink price right now: last print + the Coinbase move since that print.
@@ -38,19 +64,20 @@ class AssetPrices:
             return None
         cl_sec = self.chainlink.last_sec
         cl_val = self.chainlink.v[cl_sec]
-        spot_last = self.spot.last()
-        if spot_last is None or now - spot_last[0] > 5:
+        moves = []
+        for s in self.fast(now):                  # USDT and USD prices differ by a basis; their moves don't
+            then = s.at(cl_sec + 0.999)
+            if then is not None:
+                moves.append(s.last()[1] - then)
+        if not moves:
             return cl_val
-        spot_then = self.spot.at(cl_sec + 0.999)
-        if spot_then is None:
-            return cl_val
-        move = spot_last[1] - spot_then
+        move = sum(moves) / len(moves)
         if max_adjust is not None:
             move = max(-max_adjust, min(max_adjust, move))
         return cl_val + move
 
     def momentum_bp(self, window_s: float, now: float) -> float | None:
-        m = self.spot.move_bp(window_s, now)
+        m = self.move_bp(window_s, now)
         if m is None:  # fall back to the (slower) Chainlink series
             m = self.chainlink_local.move_bp(window_s, now)
         return m
@@ -84,6 +111,43 @@ async def run_coinbase(assets: dict[str, AssetPrices], status: dict) -> None:
         except Exception as e:
             status["coinbase"] = f"down ({type(e).__name__})"
             log.warning("coinbase feed error: %s; reconnecting in %.0fs", e, backoff)
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 30)
+
+
+def apply_binance(symbols: dict[str, AssetPrices], raw: str | bytes, now: float) -> AssetPrices | None:
+    """One combined-stream aggTrade message → the asset's Binance series. Returns the asset it updated."""
+    m = json.loads(raw)
+    d = m.get("data") or m
+    ap = symbols.get(str(d.get("s", "")).lower())
+    if ap is None or "p" not in d:
+        return None
+    ap.binance.add(now, float(d["p"]))
+    return ap
+
+
+async def run_binance(assets: dict[str, AssetPrices], status: dict) -> None:
+    symbols = {f"{a}usdt": p for a, p in assets.items()}
+    streams = "/".join(f"{s}@aggTrade" for s in symbols)
+    backoff, host = 1.0, 0
+    while True:
+        url = BINANCE_WS[host % len(BINANCE_WS)] + streams
+        connected = False
+        try:
+            async with websockets.connect(url, ssl=get_ctx(), open_timeout=10, ping_interval=20, max_size=2**22) as ws:
+                connected = True
+                status["binance"] = "up"
+                backoff = 1.0
+                while True:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=STALE_S)  # TimeoutError → reconnect
+                    ap = apply_binance(symbols, raw, time.time())
+                    if ap is not None and ap.source != "coinbase":
+                        ap.tick.set()
+        except Exception as e:
+            status["binance"] = f"down ({type(e).__name__})"
+            if not connected:
+                host += 1                        # e.g. HTTP 451 where binance.com is blocked: try the other host
+            log.warning("binance feed error: %s; reconnecting in %.0fs", e, backoff)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30)
 

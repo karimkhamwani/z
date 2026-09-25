@@ -15,6 +15,10 @@ timeframe = "5m"               # 5m | 15m | 1h | 4h
 
 [feeds]
 coinbase = true                # fast spot feed (leading indicator)
+binance = true                 # Binance BTC/USDT trades; falls back to Binance's market-data host where binance.com is blocked
+momentum_source = "coinbase"   # exchange behind the 3 s momentum, the trend filter and the price estimate:
+                               # "coinbase", "binance" or "both" (both must agree). Test with `manage.py leadlag`
+                               # and `manage.py backtest --compare-sources` before switching.
 ca_bundle = "certs/system_ca.pem"  # optional extra roots; ignored if missing. macOS on a TLS-inspecting network: `python manage.py certs`
 relax_x509_strict = true       # Python 3.13 rejects some corporate CAs; chain is still verified
 

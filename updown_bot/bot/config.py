@@ -20,6 +20,8 @@ class Markets:
 @dataclass
 class Feeds:
     coinbase: bool = True
+    binance: bool = True
+    momentum_source: str = "coinbase"     # exchange behind the signal: "coinbase", "binance" or "both"
     ca_bundle: str = ""
     relax_x509_strict: bool = True
 
@@ -139,6 +141,11 @@ def load_config(path: str | Path) -> Config:
     base = path.parent
     if cfg.mode not in ("paper", "shadow", "live"):
         raise ValueError('mode must be "paper", "shadow" or "live"')
+    f = cfg.feeds
+    if f.momentum_source not in ("coinbase", "binance", "both"):
+        raise ValueError('feeds.momentum_source must be "coinbase", "binance" or "both"')
+    if (f.momentum_source != "binance" and not f.coinbase) or (f.momentum_source != "coinbase" and not f.binance):
+        raise ValueError(f'feeds.momentum_source = "{f.momentum_source}" needs that feed switched on in [feeds]')
     if cfg.mode in ("shadow", "live"):   # real-account modes write to their own folder
         cfg.logging.data_dir = cfg.live.data_dir
     if not Path(cfg.logging.data_dir).is_absolute():

@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS rejections (
   ts REAL, slug TEXT, outcome TEXT, reason TEXT, fair REAL, ask REAL, edge REAL, momentum_bp REAL, seconds_left REAL);
 CREATE TABLE IF NOT EXISTS snapshots (
   ts REAL, slug TEXT, seconds_left REAL, reference REAL, x_now REAL, chainlink REAL, spot REAL, sigma REAL,
-  p_up REAL, up_bid REAL, up_ask REAL, down_bid REAL, down_ask REAL, momentum_bp REAL, chainlink_lag_s REAL);
+  p_up REAL, up_bid REAL, up_ask REAL, down_bid REAL, down_ask REAL, momentum_bp REAL, chainlink_lag_s REAL,
+  binance REAL);
 CREATE TABLE IF NOT EXISTS equity (
   ts REAL, cash REAL, open_cost REAL, equity REAL, peak REAL, realized REAL, rebates REAL, halted TEXT);
 CREATE TABLE IF NOT EXISTS rebates (day TEXT, fees REAL, wv_30d REAL, rate REAL, rebate REAL);
@@ -46,6 +47,8 @@ class Ledger:
         for name in ("sign_ms", "post_ms"):
             if name not in cols:
                 self.db.execute(f"ALTER TABLE orders ADD COLUMN {name} REAL")
+        if "binance" not in {r[1] for r in self.db.execute("PRAGMA table_info(snapshots)")}:
+            self.db.execute("ALTER TABLE snapshots ADD COLUMN binance REAL")
         self.db.commit()
 
     def _ins(self, table: str, row: dict) -> None:

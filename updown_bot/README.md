@@ -139,6 +139,22 @@ Every live order's time is shown in the Orders panel as **sign + send**. From a 
 
 Backtest the strategy on recent markets with `python manage.py backtest --minutes 120` (public data only; it shows the profit at several order latencies, so you can see how much speed matters).
 
+### Signal source: Coinbase, Binance or both
+
+The 3-second momentum, the trend filter and the price estimate can run on Coinbase, Binance or both
+(`[feeds] momentum_source`). With `"both"`, the two exchanges must agree on the direction. Chainlink stays the base of
+the model either way, because it decides how markets settle. If the chosen exchange goes quiet, the other takes over.
+Where binance.com is blocked, the bot uses Binance's market-data host instead.
+
+Decide with two tools:
+
+- `python manage.py backtest --minutes 480 --compare-sources` shows which source gives better signals. It uses
+  exchange timestamps, so it ignores network delay.
+- `python manage.py leadlag` shows which price reaches *your* computer first, and how early each warns before
+  Polymarket reprices. Run it on the machine that runs the bot, two or three times at different hours.
+
+Then try the new source in shadow or paper mode before live.
+
 Measure your own path with `python manage.py latency`. It reports the Cloudflare edge, new vs warm connection times and signing speed. Polymarket's servers are commonly reported to be in AWS London (eu-west-2): run the tool on a small server there and compare the warm round trip before moving the bot.
 
 ### Before real money: know the gap
