@@ -24,7 +24,7 @@ vol_halflife_s = 600           # EWMA half-life for per-second volatility
 vol_change_s = 30              # measure vol from 30 s changes (Chainlink is smoothed; 1 s changes understate vol ~2x)
 vol_prior_bp = 0.5             # display only until ~5.5 min of Chainlink data: the bot does NOT trade on this prior
 vol_floor_bp = 0.2             # absolute floor, basis points per second
-vol_restore_max_age_s = 900    # after a restart within 15 min, reuse the saved vol estimate instead of re-measuring
+vol_restore_max_age_s = 0      # 0 = measure volatility fresh on every restart (~5.5 min, no trading meanwhile); e.g. 900 = reuse if < 15 min old
 max_spot_adjust_sigma = 3.0    # cap how far a Coinbase move can shift the Chainlink estimate (x sigma·√lag)
 basis_sigma_usd = 4.0          # uncertainty of our Chainlink-now estimate (USD)
 

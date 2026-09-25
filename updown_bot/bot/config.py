@@ -31,7 +31,7 @@ class Model:
     vol_floor_bp: float = 0.2
     vol_change_s: int = 30
     vol_prior_bp: float = 0.5
-    vol_restore_max_age_s: float = 900     # reuse the saved vol estimate after a restart within this many seconds
+    vol_restore_max_age_s: float = 0       # 0 = always re-measure volatility on restart; >0 = reuse a saved estimate this fresh
     max_spot_adjust_sigma: float = 3.0     # cap Coinbase's pull on the Chainlink estimate at this many sigma·√lag
     basis_sigma_usd: float = 4.0
 

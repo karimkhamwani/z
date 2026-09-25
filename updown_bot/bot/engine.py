@@ -76,6 +76,9 @@ class Engine:
 
     # ---------- volatility state across restarts ----------
     def _restore_vol(self) -> None:
+        if self.cfg.model.vol_restore_max_age_s <= 0:
+            log.info("measuring volatility fresh from Chainlink (~5.5 min); no trading until it's ready")
+            return
         path = self.data / "vol_state.json"
         try:
             saved = json.loads(path.read_text(encoding="utf-8"))

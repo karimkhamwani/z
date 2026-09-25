@@ -119,7 +119,7 @@ Live halts are sticky until you restart. The reason is shown on the dashboard an
 Use `python manage.py run --live` under a service manager that restarts it: Task Scheduler or NSSM on Windows, `launchd` on macOS, `systemd` on Linux. On restart it resumes its state and cancels stray orders.
 
 ### Lessons from the first live session (Sep 24)
-- **Don't restart often.** Every restart skips the current window, and a restart more than 15 min after the last stop has to re-measure volatility. The first session restarted 6 times in 30 min, and **8 of its 12 fills were placed on the default volatility**, which lost $14.49 of the $21.47. The bot now refuses to trade on the default.
+- **Don't restart often.** Every restart skips the current window and re-measures volatility (about 5.5 min without trading). The first session restarted 6 times in 30 min, and **8 of its 12 fills were placed on the default volatility**, which lost $14.49 of the $21.47. The bot now refuses to trade on the default.
 - **"No orders found to match" is normal:** a fill-and-kill order found nothing at your price. It now counts as a no-fill, not an error.
 - **The first order in a market used to take ~2 s** (the SDK loading market details); the bot now loads them as soon as a market appears. Other orders take ~0.6 s.
 
@@ -149,7 +149,7 @@ Every 100 ms, for each live market:
 2. **Chainlink now** is estimated as the last Chainlink print plus the Coinbase move since that print. Chainlink lags about 1–2 s; Coinbase leads.
 3. **Fair value** P(Up) = Φ((E[final TWAP] − R) / sd). Seconds of the final minute that have already printed are locked in. The rest follow a random walk with σ from 30-second changes (EWMA, 10-minute half-life). See `bot/model.py`.
 4. **Signal:** the coin moved **≥ 0.5 bp in the last 3 s** toward a side, **and** that side's ask is below fair value by **≥ 2¢ after the taker fee** (fee = 0.07 × p × (1 − p) per share). Guards added after the first live session:
-   - **No trading until volatility is measured.** It takes about 5.5 min of Chainlink data after a fresh start. After a restart within 15 min, the saved estimate is reused, so there's no wait.
+   - **No trading until volatility is measured.** Every start and restart measures it fresh from Chainlink (about 5.5 min) before trading. Set `vol_restore_max_age_s` (e.g. 900) to reuse a recent saved estimate instead.
    - **Edges above 12¢ are skipped** (`max_edge`): a disagreement that large usually means the model is wrong, not the market.
    - **3-second moves above 5 bp are skipped** (`max_momentum_bp`).
    - **Coinbase can shift the Chainlink estimate by at most 3 σ·√lag** (`max_spot_adjust_sigma`), so a one-exchange spike can't flip the model.
