@@ -159,14 +159,25 @@ def analyse(data: dict) -> None:
         res[f] = best
         print(f"   {f.capitalize():9} Polymarket follows {best[1] * 1000:4.0f} ms later   (match {best[0]:.2f})")
     gain = (res["binance"][1] - res["coinbase"][1]) * 1000
+    mb, mc = res["binance"][0], res["coinbase"][0]
+    same_warning = abs(gain) < GRID * 1000        # below the measurement step
+    similar_match = abs(mb - mc) < 0.05
     print("\nOn this computer:")
-    print(f"   Binance gives {abs(gain):.0f} ms {'MORE' if gain > 0 else 'LESS'} warning than Coinbase, and Polymarket "
-          f"follows it {'more' if res['binance'][0] > res['coinbase'][0] else 'less'} closely "
-          f"({res['binance'][0]:.2f} vs {res['coinbase'][0]:.2f}).")
-    if gain >= 0 and res["binance"][0] >= res["coinbase"][0]:
-        print('   → Binance looks better here: try momentum_source = "binance" (or "both") in shadow mode.')
-    elif gain < 0 and res["binance"][0] > res["coinbase"][0]:
-        print('   → Mixed: Binance is the better signal but reaches you later. "both" is the cautious choice.')
+    warn = "the same warning as Coinbase" if same_warning else \
+        f"{abs(gain):.0f} ms {'more' if gain > 0 else 'less'} warning than Coinbase"
+    follow = "about as closely" if similar_match else ("more closely" if mb > mc else "less closely")
+    print(f"   Binance gives {warn}, and Polymarket follows it {follow} ({mb:.2f} vs {mc:.2f}).")
+    if lead[1] >= 0:
+        print('   Binance reaches you no later than Coinbase, so "both" (the two must agree) is no slower than '
+              "Coinbase alone.")
+    if max(mb, mc) < 0.35:
+        print("   → Inconclusive: Polymarket's price barely tracked either exchange in this recording (match below 0.35).")
+        print("     Usually the Polymarket feed is falling behind on this connection, or the bot was running at the same")
+        print("     time and sharing the bandwidth. Run it again with the bot stopped.")
+    elif (gain >= 0 or same_warning) and (mb >= mc or similar_match):
+        print('   → Binance is at least as good here: try momentum_source = "both" (or "binance") in shadow mode.')
+    elif gain < 0 and mb > mc:
+        print('   → Mixed: Binance is the better signal but warns you later. "both" is the cautious choice.')
     else:
         print('   → Coinbase looks better here: keep momentum_source = "coinbase".')
     print("   Five minutes is a small sample: run it two or three times, at different hours, before switching.")
