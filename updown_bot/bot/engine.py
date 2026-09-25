@@ -17,7 +17,7 @@ from .feeds import AssetPrices, run_chainlink, run_coinbase
 from .ledger import Ledger
 from .markets import Market, TF_SECONDS, fetch_market, fetch_winner, window_start
 from .model import fair_value
-from .net import atomic_write_text
+from .net import LOOP, atomic_write_text
 from .paper import PaperExecutor, Portfolio, credit_rebates, rebate_rate, settle, utc_day
 from .risk import RiskManager
 from .secrets import mask
@@ -322,6 +322,21 @@ class Engine:
             return True
         return self.pf.cash < self.cfg.live.min_cash_usd
 
+    def _unlisted_value(self, snap, now: float) -> float:
+        """Cost of shares we bought that Polymarket's positions list doesn't show yet. The balance drops the moment
+        an order fills, but the positions list can lag by a sync or more; without this, equity briefly reads as
+        cash only (Sep 24 23:40: a $4.20 fill made equity read $24.40 instead of $28.60 → false drawdown halt).
+        Only for markets still running; after the end the positions list is trusted (a loss is worth 0)."""
+        extra = 0.0
+        for cid, pos in self.pf.positions.items():
+            ours = pos.up_shares + pos.down_shares
+            if ours <= 0 or now >= pos.end:
+                continue
+            missing = ours - snap.shares_by_market.get(cid, 0.0)
+            if missing > 0.01:
+                extra += pos.cost * min(missing / ours, 1.0)
+        return extra
+
     async def account_loop(self) -> None:
         failures = 0
         while True:
@@ -329,7 +344,7 @@ class Engine:
                 snap = await self.account.snapshot()
                 failures = 0
                 self.pf.cash = snap.cash
-                self.pf.positions_value = snap.positions_value
+                self.pf.positions_value = snap.positions_value + self._unlisted_value(snap, time.time())
                 self.pf.claimable_value = snap.claimable_value
                 self.pf.last_sync = snap.ts
                 if self.needs_initial_equity:
@@ -425,6 +440,7 @@ class Engine:
                     "min_cash_usd": self.cfg.live.min_cash_usd, **self.account_info}
         st = {"ts": now, "mode": self.cfg.mode, "live": live, "started": self.started, "feeds": dict(self.status),
               "book_lag_ms": round(self.books.feed_lag() * 1000), "book_msgs": self.books.msgs,
+              "loop_stall_ms": round(LOOP.worst(60) * 1000), "loop_stalls": LOOP.count,
               "halted": pf.halted, "stats": dict(self.stats), "pending_settlement": len(self.pending),
               "portfolio": {"equity": pf.equity, "cash": pf.cash, "open_cost": pf.open_cost, "peak": pf.peak_equity,
                             "positions_value": pf.positions_value,
@@ -444,7 +460,7 @@ class Engine:
                          "daily_loss_stop_basis": self.cfg.risk.daily_loss_stop_basis,
                          "daily_loss_limit_usd": self.risk.daily_loss_limit(),
                          "max_drawdown_kill_pct": self.cfg.risk.max_drawdown_kill_pct}}
-        atomic_write_text(self.data / "status.json", json.dumps(st))
+        atomic_write_text(self.data / "status.json", json.dumps(st), retries=1)   # skip if locked; rewritten in 1 s
 
     async def status_loop(self) -> None:
         while True:
@@ -479,7 +495,7 @@ class Engine:
                 log.info("cancelled any resting orders")
         self.risk.roll_day(time.time())
         coros = [run_chainlink(self.prices, self.status), self.books.run(), self.market_loop(), self.signal_loop(),
-                 self.settle_loop(), self.snapshot_loop(), self.status_loop()]
+                 self.settle_loop(), self.snapshot_loop(), self.status_loop(), LOOP.run()]
         if self.cfg.feeds.coinbase:
             coros.append(run_coinbase(self.prices, self.status))
         if self.account is not None:

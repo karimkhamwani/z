@@ -8,7 +8,7 @@ import time
 
 import websockets
 
-from .net import get_ctx
+from .net import LOOP, get_ctx
 
 try:                       # C JSON parser: several times faster on the ~1,000 msg/s market channel
     import orjson
@@ -179,6 +179,9 @@ class BookFeed:
                     continue
             except Exception as e:
                 self.status["clob"] = f"down ({type(e).__name__})"
-                log.warning("clob feed error: %s; reconnecting in %.0fs", e, backoff)
+                stall = LOOP.worst(30)
+                log.warning("clob feed error: %s; reconnecting in %.0fs%s", e, backoff,
+                            f" (bot froze {stall:.1f}s just before: this PC/process is the cause)" if stall > 0.5 else
+                            " (the bot wasn't frozen: the network path couldn't keep up)" if "1013" in str(e) else "")
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 30)

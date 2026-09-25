@@ -39,6 +39,7 @@ class AccountSnapshot:
     open_positions: int
     raw_balance: int
     claimable_value: float = 0.0   # value of resolved winning positions not yet claimed
+    shares_by_market: dict[str, float] = field(default_factory=dict)   # condition id → shares the API lists
 
 
 @dataclass
@@ -69,19 +70,21 @@ class LiveAccount:
         value = claimable = 0.0
         redeemable: list[str] = []
         n_open = 0
+        shares: dict[str, float] = {}
         async for p in self.client.list_positions(user=self.wallet).iter_items():
             size = float(p.current_size or 0)
             if size <= 0:
                 continue
             v = float(p.current_value or 0)
             n_open += 1
+            shares[str(p.condition_id)] = shares.get(str(p.condition_id), 0.0) + size
             if p.redeemable:
                 if v > 0:
                     redeemable.append(str(p.condition_id))
                     claimable += v
             else:
                 value += v
-        return AccountSnapshot(time.time(), cash, value, redeemable, n_open, int(bal.balance), claimable)
+        return AccountSnapshot(time.time(), cash, value, redeemable, n_open, int(bal.balance), claimable, shares)
 
     async def redeem(self, condition_id: str) -> str | None:
         if not self.creds.can_redeem:

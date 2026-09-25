@@ -219,5 +219,54 @@ class TestPrewarm(unittest.TestCase):
         asyncio.run(acct.prewarm(["UP"]))
 
 
+class TestFillNotYetListed(unittest.TestCase):
+    """Sep 24 23:40:20: a $4.20 fill left cash at $24.40 while Polymarket's positions list didn't show the new
+    position yet, so equity read $24.40 (real: $28.60) and tripped the 35% drawdown kill from the $38.89 peak."""
+
+    def engine(self, pos_end):
+        from bot.engine import Engine
+        from bot.paper import Position
+        eng = Engine.__new__(Engine)
+        eng.pf = Portfolio(cash=24.40, starting_equity=38.69, peak_equity=38.89)
+        eng.pf.positions["C1"] = Position("btc-updown-5m-1", "C1", end=pos_end, up_shares=5.0, cost=4.20)
+        return eng
+
+    def snap(self, listed):
+        from bot.live import AccountSnapshot
+        return AccountSnapshot(time.time(), 24.40, 4.15 if listed else 0.0, [], int(listed), 24_400_000, 0.0,
+                               {"C1": 5.0} if listed else {})
+
+    def test_unlisted_fill_counts_at_cost(self):
+        from bot.config import Risk
+        from bot.risk import RiskManager
+        eng = self.engine(pos_end=time.time() + 200)
+        snap = self.snap(listed=False)
+        eng.pf.positions_value = snap.positions_value + eng._unlisted_value(snap, time.time())
+        self.assertAlmostEqual(eng.pf.equity, 28.60)
+        self.assertEqual(RiskManager(Risk(max_drawdown_kill_pct=0.35), eng.pf).check_breakers(), "")
+
+    def test_listed_fill_is_not_double_counted(self):
+        eng = self.engine(pos_end=time.time() + 200)
+        self.assertEqual(eng._unlisted_value(self.snap(listed=True), time.time()), 0.0)
+
+    def test_ended_market_trusts_the_api(self):
+        eng = self.engine(pos_end=time.time() - 5)          # a lost position drops to 0: don't prop it up
+        self.assertEqual(eng._unlisted_value(self.snap(listed=False), time.time()), 0.0)
+
+
+class TestNoBlockingStatusWrite(unittest.TestCase):
+    def test_locked_status_file_is_skipped_without_sleeping(self):
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        from bot.net import atomic_write_text
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / "status.json"
+            with mock.patch("pathlib.Path.replace", side_effect=PermissionError), \
+                    mock.patch("time.sleep") as slept:
+                atomic_write_text(target, "{}", retries=1)
+            slept.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
