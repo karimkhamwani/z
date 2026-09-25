@@ -60,6 +60,38 @@ class TestVolatilityGate(unittest.TestCase):
         self.assertIsNone(intent)
 
 
+class TestVolBiasCorrection(unittest.TestCase):
+    def test_one_large_first_change_does_not_dominate(self):
+        """Sep 24 session 2: the connection snapshot's first 30 s change was large; the old estimator still
+        reported $6-8/s after warm-up while Chainlink moved ~$3.5/s."""
+        import random
+        rng = random.Random(5)
+        v = EwmaVol(halflife_s=600, floor_bp=0.0, change_s=30, prior_bp=0.0, warmup=300)
+        alpha, old_var, hist = v.alpha, None, {}      # the previous estimator, replayed on the same data
+
+        def feed(sec, price):
+            nonlocal old_var
+            v.update(sec, price)
+            hist[sec] = price
+            past = next((hist[sec - 30 - d] for d in range(3) if sec - 30 - d in hist), None)
+            if past is not None:
+                d2 = (price - past) ** 2 / 30
+                old_var = d2 if old_var is None else (1 - alpha) * old_var + alpha * d2
+
+        x = 84400.0
+        feed(0, x)
+        x += 250.0
+        feed(30, x)                         # one huge first change (≈ $45/s over 30 s)
+        for s in range(31, 31 + 330):       # then a steady $3.5/s random walk
+            x += rng.gauss(0, 3.5)
+            feed(s, x)
+        self.assertTrue(v.ready)
+        old_sigma = old_var ** 0.5
+        self.assertGreater(old_sigma, 25)            # the old estimator is still dominated by the first sample
+        self.assertLess(v.sigma(x), 6.5)             # now: one outlier counts ~1/300, close to the true $3.5
+        self.assertGreater(v.sigma(x), 2.5)
+
+
 class TestSpikeCap(unittest.TestCase):
     def test_coinbase_spike_is_capped(self):
         """19:54:01: Coinbase fell ~$23 in 3 s while Chainlink (84393.65) barely moved; start price 84373.96.

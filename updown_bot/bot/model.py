@@ -103,20 +103,29 @@ class SecondBars:
 
 
 class EwmaVol:
-    """Per-second volatility (USD) from an EWMA of squared k-second changes of the settlement series.
+    """Per-second volatility (USD) from a bias-corrected EWMA of squared k-second changes of the settlement series.
 
     k = 30 s matters: Chainlink prints are smoothed, so 1-second changes understate volatility by ~2x, while
-    30-second changes match real spot. Calibrated on 1,832 resolved BTC-5m markets (k=30, half-life 600 s,
-    no multiplier gave the best log-loss and a well-calibrated reliability curve). Until `warmup` observations
-    exist, sigma is at least the long-run prior."""
+    30-second changes match real spot. Calibrated on 1,832 resolved BTC-5m markets (k=30, half-life 600 s).
+
+    Bias correction (Sep 24 live finding): a plain EWMA seeded with its first sample kept ~70% of that one sample
+    after the 5-minute warm-up (half-life 600 s), so one large change in the connection snapshot inflated sigma to
+    $6-8/s while Chainlink moved ~$3.5/s — and the market priced ~$3.6/s. Here every sample counts equally until
+    enough history accumulates: var = m / w, with m and w decaying together. Until `warmup` samples exist, sigma is
+    at least the long-run prior (display only: the engine doesn't trade before `ready`)."""
 
     def __init__(self, halflife_s: float, floor_bp: float, change_s: int = 30, prior_bp: float = 0.5,
                  warmup: int = 300):
         self.alpha = 1 - 0.5 ** (1 / halflife_s)
-        self.var: float | None = None
         self.floor_bp, self.prior_bp, self.k, self.warmup = floor_bp, prior_bp, change_s, warmup
         self.n = 0
+        self._m = 0.0        # EWMA of squared changes (per second), started at 0
+        self._w = 0.0        # EWMA of 1 with the same decay: the bias correction
         self._hist: dict[int, float] = {}
+
+    @property
+    def var(self) -> float | None:
+        return self._m / self._w if self._w > 0 else None
 
     def update(self, sec: int, value: float) -> None:
         if sec in self._hist:
@@ -130,7 +139,8 @@ class EwmaVol:
                 break
         if past is not None:
             d2 = (value - past) ** 2 / self.k
-            self.var = d2 if self.var is None else (1 - self.alpha) * self.var + self.alpha * d2
+            self._m = (1 - self.alpha) * self._m + self.alpha * d2
+            self._w = (1 - self.alpha) * self._w + self.alpha
             self.n += 1
         if len(self._hist) > 4 * self.k + 60:
             for s in [s for s in self._hist if s < sec - 2 * self.k - 10]:
@@ -144,7 +154,8 @@ class EwmaVol:
         return self.n >= self.warmup and self.var is not None
 
     def sigma(self, price: float) -> float:
-        est = math.sqrt(self.var) if self.var is not None else 0.0
+        v = self.var
+        est = math.sqrt(v) if v is not None else 0.0
         if self.n < self.warmup:
             est = max(est, self.prior_bp * 1e-4 * price)
         return max(est, self.floor_bp * 1e-4 * price)
@@ -155,7 +166,7 @@ class EwmaVol:
     def restore(self, state: dict) -> None:
         """Carry a warmed estimate over a quick restart (the engine checks it isn't stale)."""
         if state.get("var"):
-            self.var = float(state["var"])
+            self._m, self._w = float(state["var"]), 1.0
             self.n = int(state.get("n", 0))
 
 

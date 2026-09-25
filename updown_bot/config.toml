@@ -34,7 +34,7 @@ min_momentum_bp = 0.5          # coin must have moved >= this toward the side we
 min_edge = 0.02                # $/share required after the taker fee
 max_edge = 0.12                # skip bigger "edges": when model and market disagree that much, the model is usually wrong
 max_momentum_bp = 5.0          # skip 3-second moves bigger than this (single-exchange spikes); 0 = off
-min_price = 0.05
+min_price = 0.20               # skip long shots: buys under 20¢ lost money in both analysed wallets and in live shadow
 max_price = 0.95
 min_seconds_left = 5           # don't send orders in the last N seconds
 min_seconds_elapsed = 3        # wait for the start reference to be known

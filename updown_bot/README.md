@@ -111,7 +111,7 @@ It prints the wallet, balance and limits and starts trading. (Set `require_confi
 | Matching delay | markets with `seconds_delay > 0` are never traded |
 | Rate limit | at most `max_orders_per_minute` (20) |
 | Resting orders | `cancel_all_on_start` cancels open orders at start and shutdown, **including ones you placed by hand** (set it to false if you trade manually on the same account) |
-| Existing limits | 5 shares/order, $30/market incl. fees, daily stop 50% of starting capital, 35% drawdown halt |
+| Existing limits | 5 shares/order, $30/market incl. fees, daily stop 50% of starting capital, 35% drawdown halt, no buys under 20¢ (`min_price`) |
 
 Live halts are sticky until you restart. The reason is shown on the dashboard and in `data_live/bot.log` (rotated, 5 × 5 MB).
 
