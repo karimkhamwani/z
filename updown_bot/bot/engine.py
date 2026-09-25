@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import time
 from collections import deque
 from dataclasses import asdict
@@ -48,6 +49,7 @@ class Engine:
         self.status: dict[str, str] = {"coinbase": "off", "chainlink": "connecting", "clob": "connecting"}
         self.prices = {a: AssetPrices(a, cfg.model.vol_halflife_s, cfg.model.vol_floor_bp, cfg.model.vol_change_s,
                                   cfg.model.vol_prior_bp) for a in cfg.markets.assets}
+        self._restore_vol()
         self.books = BookFeed(self.status)
         self.risk = RiskManager(cfg.risk, self.pf)
         if self.mode == "paper":
@@ -72,6 +74,28 @@ class Engine:
         for cid, pos in self.pf.positions.items():   # positions restored from disk still need settlement
             self.pending[cid] = {"slug": pos.slug, "end": pos.end, "model_winner": None}
 
+    # ---------- volatility state across restarts ----------
+    def _restore_vol(self) -> None:
+        path = self.data / "vol_state.json"
+        try:
+            saved = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        age = time.time() - saved.get("ts", 0)
+        if age > self.cfg.model.vol_restore_max_age_s:
+            log.info("saved volatility is %.0f min old: measuring afresh (~5.5 min before trading)", age / 60)
+            return
+        for a, st in saved.get("assets", {}).items():
+            if a in self.prices:
+                self.prices[a].vol.restore(st)
+        log.info("restored volatility from %.0f s ago: %s", age,
+                 {a: round(p.vol.sigma(1.0) if p.vol.var else 0, 2) for a, p in self.prices.items()})
+
+    def _save_vol(self, now: float) -> None:
+        state = {a: p.vol.state() for a, p in self.prices.items() if p.vol.ready}
+        if state:
+            atomic_write_text(self.data / "vol_state.json", json.dumps({"ts": now, "assets": state}))
+
     # ---------- market management ----------
     async def market_loop(self) -> None:
         tf = self.cfg.markets.timeframe
@@ -89,6 +113,8 @@ class Engine:
                             m = await fetch_market(asset, tf, start)
                             if m:
                                 self.markets[slug] = m
+                                if self.mode == "live" and self.account is not None:
+                                    asyncio.create_task(self.account.prewarm([m.up_token, m.down_token]))
                         except Exception as e:
                             log.debug("market fetch %s failed: %s", slug, e)
             for slug in list(self.markets):
@@ -127,11 +153,15 @@ class Engine:
         if p.chainlink.last_sec is None or now - p.chainlink.last_sec > MAX_CHAINLINK_AGE_S:
             return None  # never price off a stale settlement feed
         ref = self._reference(m)
-        x = p.estimate_now(now)
+        cl = p.chainlink.v[p.chainlink.last_sec]
+        sigma = p.vol.sigma(cl)
+        lag = max(0.0, now - p.chainlink.last_sec)
+        cap = self.cfg.model.max_spot_adjust_sigma * sigma * math.sqrt(lag + 1) if self.cfg.model.max_spot_adjust_sigma else None
+        x = p.estimate_now(now, max_adjust=cap)
         if ref is None or x is None:
             return None
         return fair_value(reference=ref, x_now=x, now_sec=int(now), end_sec=m.end, lookback=m.twap_lookback,
-                          realized=p.chainlink, sigma=p.vol.sigma(x), basis_sigma=self.cfg.model.basis_sigma_usd)
+                          realized=p.chainlink, sigma=sigma, basis_sigma=self.cfg.model.basis_sigma_usd)
 
     # ---------- trading ----------
     async def signal_loop(self) -> None:
@@ -145,6 +175,8 @@ class Engine:
                 if not (m.start <= now < m.end):
                     continue
                 if m.seconds_delay > 0:   # delayed matching: a 3-second momentum edge can't survive it
+                    continue
+                if not self.prices[m.asset].vol.ready:   # only trade on volatility measured from Chainlink itself
                     continue
                 fv = self._fair(m, now)
                 if fv is None:
@@ -246,6 +278,7 @@ class Engine:
             if self.risk.roll_day(now):
                 self.ledger.event(now, "new_day", f"equity {self.pf.equity:.2f}")
             self.pf.save(self.state_path)
+            self._save_vol(now)
             self.ledger.commit()
 
     # ---------- live account ----------
@@ -351,6 +384,7 @@ class Engine:
                 "edge_up": fv.p_up - ua - fee(ua) if fv and ua else None,
                 "edge_down": (1 - fv.p_up) - da - fee(da) if fv and da else None,
                 "momentum_bp": p.momentum_bp(self.cfg.strategy.momentum_window_s, now),
+                "vol_ready": p.vol.ready, "vol_obs": p.vol.n, "vol_warmup": p.vol.warmup,
                 "position": {"up_shares": pos.up_shares, "down_shares": pos.down_shares, "cost": pos.cost,
                              "orders": pos.orders} if pos else None})
         live = None
@@ -395,7 +429,9 @@ class Engine:
             for m in active:
                 fv = self._fair(m, now)
                 ub = self.books.book(m.up_token)
-                fvs.append(f"{m.asset}:{int(m.end - now)}s p_up={fv.p_up:.2f}" if fv else f"{m.asset}:warming")
+                vol = self.prices[m.asset].vol
+                tag = "" if vol.ready else f" (measuring vol {min(vol.n, vol.warmup)}/{vol.warmup}, not trading)"
+                fvs.append((f"{m.asset}:{int(m.end - now)}s p_up={fv.p_up:.2f}" if fv else f"{m.asset}:warming") + tag)
                 if ub and ub.best_ask():
                     fvs[-1] += f" ask_up={ub.best_ask():.2f}"
             log.info("equity %.2f (cash %.2f, open %.2f) | realized %+.2f | rebates %.2f | tier %.0f%% | "

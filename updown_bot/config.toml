@@ -22,14 +22,18 @@ relax_x509_strict = true       # Python 3.13 rejects some corporate CAs; chain i
 twap_lookback_s = 60           # markets settle on Chainlink 60s TWAP (end) vs 60s TWAP (start)
 vol_halflife_s = 600           # EWMA half-life for per-second volatility
 vol_change_s = 30              # measure vol from 30 s changes (Chainlink is smoothed; 1 s changes understate vol ~2x)
-vol_prior_bp = 0.5             # long-run per-second vol used until ~5 min of data (BTC week avg ≈ 0.54 bp/s)
+vol_prior_bp = 0.5             # display only until ~5.5 min of Chainlink data: the bot does NOT trade on this prior
 vol_floor_bp = 0.2             # absolute floor, basis points per second
+vol_restore_max_age_s = 900    # after a restart within 15 min, reuse the saved vol estimate instead of re-measuring
+max_spot_adjust_sigma = 3.0    # cap how far a Coinbase move can shift the Chainlink estimate (x sigma·√lag)
 basis_sigma_usd = 4.0          # uncertainty of our Chainlink-now estimate (USD)
 
 [strategy]
 momentum_window_s = 3          # the signal both bots profit from
 min_momentum_bp = 0.5          # coin must have moved >= this toward the side we buy
 min_edge = 0.02                # $/share required after the taker fee
+max_edge = 0.12                # skip bigger "edges": when model and market disagree that much, the model is usually wrong
+max_momentum_bp = 5.0          # skip 3-second moves bigger than this (single-exchange spikes); 0 = off
 min_price = 0.05
 max_price = 0.95
 min_seconds_left = 5           # don't send orders in the last N seconds
@@ -39,7 +43,7 @@ side_cooldown_s = 2.0          # min gap between orders on the same side of a ma
 max_orders_per_market = 30
 
 [execution]
-latency_ms = 300               # paper: re-read the book this long after the signal, then fill
+latency_ms = 700               # paper: re-read the book this long after the signal (live measured ~0.6 s, first order 2 s)
 liquidity_haircut = 0.5        # paper: assume only this fraction of displayed size is really available
 max_slippage = 0.02            # limit = ask + this (never above fair − fee − min_edge)
 fee_rate = 0.07                # crypto taker fee: rate × shares × p × (1 − p)

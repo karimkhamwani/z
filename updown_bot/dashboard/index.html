@@ -279,7 +279,7 @@ function renderLive() {
       <div><span>Chainlink now (est.)</span><b class="${cls(diff)}">${m.x_now != null ? m.x_now.toFixed(2) : "—"}</b></div>
       <div><span>Distance</span><b class="${cls(diff)}">${diff != null ? (diff >= 0 ? "+" : "−") + Math.abs(diff).toFixed(2) : "—"}</b></div>
       <div><span>3 s momentum</span><b class="${cls(mom)}">${mom != null ? (mom >= 0 ? "▲ " : "▼ ") + Math.abs(mom).toFixed(2) + " bp" : "—"}</b></div>
-      <div><span>σ per second</span><b>${m.sigma != null ? "$" + m.sigma.toFixed(2) : "—"}</b></div>
+      <div><span>σ per second</span><b>${m.sigma != null ? "$" + m.sigma.toFixed(2) : "—"}${m.vol_ready === false ? ' <span class="muted">(default)</span>' : ""}</b></div>
       <div><span>Chainlink lag</span><b>${m.chainlink_age_s != null ? m.chainlink_age_s.toFixed(1) + " s" : "—"}</b></div>
     </div>
     <div>
@@ -295,6 +295,7 @@ function renderLive() {
       <div class="side ${eu.hot ? "hot" : ""}"><span class="t">Buy Up @ ${f2(m.up_ask)} — edge after fee</span><span class="e ${cls(eu.e)}">${eu.e != null ? (eu.e * 100).toFixed(1) + "¢" : "—"}</span></div>
       <div class="side ${ed.hot ? "hot" : ""}"><span class="t">Buy Down @ ${f2(m.down_ask)} — edge after fee</span><span class="e ${cls(ed.e)}">${ed.e != null ? (ed.e * 100).toFixed(1) + "¢" : "—"}</span></div>
     </div>
+    ${m.vol_ready === false ? `<div class="banner info">Measuring volatility from Chainlink before trading: ${Math.min(m.vol_obs, m.vol_warmup)}/${m.vol_warmup} samples (~${Math.max(0, Math.ceil((m.vol_warmup - m.vol_obs) / 60))} min left). The bot doesn't trade on the default estimate.</div>` : ""}
     ${m.reference == null ? `<div class="banner info">Not trading this window: the bot started after it opened, so it doesn't have the Chainlink prints needed for the start price. It trades from the next window (${hhmmss(m.end)}).</div>` : ""}
     ${m.chainlink_age_s != null && m.chainlink_age_s > 10 ? `<div class="banner">Chainlink feed stale (${Math.round(m.chainlink_age_s)} s) — trading paused until it reconnects.</div>` : ""}
     <div class="muted">${pos ? `Position: ${pos.up_shares.toFixed(2)} Up / ${pos.down_shares.toFixed(2)} Down · spent ${usd(pos.cost)}${c.max_market_usd ? ` of $${c.max_market_usd} cap` : ""} · ${pos.orders} orders` : "No position in this market."}</div>`;

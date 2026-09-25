@@ -31,6 +31,8 @@ class Model:
     vol_floor_bp: float = 0.2
     vol_change_s: int = 30
     vol_prior_bp: float = 0.5
+    vol_restore_max_age_s: float = 900     # reuse the saved vol estimate after a restart within this many seconds
+    max_spot_adjust_sigma: float = 3.0     # cap Coinbase's pull on the Chainlink estimate at this many sigma·√lag
     basis_sigma_usd: float = 4.0
 
 
@@ -39,6 +41,8 @@ class Strategy:
     momentum_window_s: float = 3
     min_momentum_bp: float = 0.5
     min_edge: float = 0.02
+    max_edge: float = 0.12                 # skip "edges" bigger than this (0 = off)
+    max_momentum_bp: float = 5.0           # skip 3-second moves bigger than this: single-venue spikes (0 = off)
     min_price: float = 0.05
     max_price: float = 0.95
     min_seconds_left: float = 5
@@ -50,7 +54,7 @@ class Strategy:
 
 @dataclass
 class Execution:
-    latency_ms: float = 300
+    latency_ms: float = 700
     liquidity_haircut: float = 0.5
     max_slippage: float = 0.02
     fee_rate: float = 0.07

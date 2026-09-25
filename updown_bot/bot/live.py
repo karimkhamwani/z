@@ -105,9 +105,26 @@ class LiveAccount:
     async def cancel_all(self) -> None:
         await self.client.cancel_all()
 
+    async def prewarm(self, token_ids: list[str]) -> None:
+        """Load a market's order metadata into the SDK's cache before the first order. Measured live: the first
+        order in each market took 2.0-2.4 s (metadata lookup) versus ~0.6 s afterwards."""
+        try:
+            ctx = self.client._ctx
+            for tok in token_ids:
+                await ctx.order_metadata.resolve_market(ctx, token_id=tok)
+        except Exception as e:   # private SDK internals: if they change, orders still work, just slower
+            log.debug("prewarm skipped: %s", e)
+
     async def close(self) -> None:
         if self.client is not None:
             await self.client.close()
+
+
+def is_no_match(e: Exception) -> bool:
+    """The SDK raises RequestRejectedError('no orders found to match with FAK order ...') when a FAK finds
+    nothing to fill; the response-code path (`fak_not_filled`) is handled separately."""
+    msg = str(e).lower()
+    return type(e).__name__ == "RequestRejectedError" and ("no orders found to match" in msg or "fak" in msg and "killed" in msg)
 
 
 def order_params(shares: float, limit: float, fee_rate: float) -> tuple[float, float]:
@@ -154,6 +171,18 @@ class LiveExecutor:
                 max_spend=f"{max_spend:.2f}", order_type="FAK"), timeout=self.timeout)
         except Exception as e:  # timeout / network: the order may or may not have reached the exchange
             latency = time.time() - t0
+            if is_no_match(e):   # a definitive "nothing to fill against" — not an error, nothing to recover
+                self._order_row(market, outcome, amount, max_spend, limit, ok=0, status="rejected",
+                                code="fak_not_filled", message=str(e)[:300], latency_s=latency)
+                self.errors = 0
+                return None
+            if type(e).__name__ == "RequestRejectedError":   # server refused it: no order exists, skip the check
+                self._order_row(market, outcome, amount, max_spend, limit, ok=0, status="rejected",
+                                code=type(e).__name__, message=str(e)[:300], latency_s=latency)
+                if "balance" in str(e).lower() or "allowance" in str(e).lower():
+                    raise HaltTrading(f"exchange rejected order: {e}")
+                self._error(f"rejected: {e}")
+                return None
             self._order_row(market, outcome, amount, max_spend, limit, ok=0, status="error", code=type(e).__name__,
                             message=str(e)[:300], latency_s=latency)
             fill = await self._recover(market, outcome, token, t0, context)

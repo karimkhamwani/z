@@ -50,6 +50,9 @@ def evaluate(cfg: Strategy, *, p_up: float, momentum_bp: float | None, books: di
         directional = momentum_bp if outcome == "Up" else -momentum_bp
         if directional < cfg.min_momentum_bp:
             continue  # no signal for this side — not logged (the common case)
+        if cfg.max_momentum_bp and directional > cfg.max_momentum_bp:
+            rejections.append(Rejection(outcome, "momentum_spike", fair, None, None, momentum_bp))
+            continue
         book = books.get(outcome)
         if book is None or book.age(now) > cfg.max_book_age_s:
             rejections.append(Rejection(outcome, "stale_book", fair, None, None, momentum_bp))
@@ -64,6 +67,9 @@ def evaluate(cfg: Strategy, *, p_up: float, momentum_bp: float | None, books: di
             continue
         if edge < cfg.min_edge:
             rejections.append(Rejection(outcome, "edge_below_min", fair, ask, edge, momentum_bp))
+            continue
+        if cfg.max_edge and edge > cfg.max_edge:   # the market rarely misprices by this much; the model more often errs
+            rejections.append(Rejection(outcome, "edge_too_large", fair, ask, edge, momentum_bp))
             continue
         limit = min(round(ask + max_slippage, 4), max_limit_for_edge(fair, cfg.min_edge, fee_rate, tick))
         if limit < ask:

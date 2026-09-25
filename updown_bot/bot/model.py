@@ -136,11 +136,27 @@ class EwmaVol:
             for s in [s for s in self._hist if s < sec - 2 * self.k - 10]:
                 del self._hist[s]
 
+    @property
+    def ready(self) -> bool:
+        """True once sigma rests on this series' own changes. The strategy never trades before that: the
+        prior (a long-run average) can be 2x off in a calm or busy hour, and an overstated sigma makes cheap
+        long shots look underpriced (the cause of the first live session's losses)."""
+        return self.n >= self.warmup and self.var is not None
+
     def sigma(self, price: float) -> float:
         est = math.sqrt(self.var) if self.var is not None else 0.0
         if self.n < self.warmup:
             est = max(est, self.prior_bp * 1e-4 * price)
         return max(est, self.floor_bp * 1e-4 * price)
+
+    def state(self) -> dict:
+        return {"var": self.var, "n": self.n}
+
+    def restore(self, state: dict) -> None:
+        """Carry a warmed estimate over a quick restart (the engine checks it isn't stale)."""
+        if state.get("var"):
+            self.var = float(state["var"])
+            self.n = int(state.get("n", 0))
 
 
 @dataclass

@@ -29,8 +29,10 @@ class AssetPrices:
         self.chainlink_local = PriceSeries()      # Chainlink prints keyed by local receive time (lag diagnostics)
         self.vol = EwmaVol(vol_halflife_s, vol_floor_bp, vol_change_s, vol_prior_bp)
 
-    def estimate_now(self, now: float) -> float | None:
-        """Best estimate of the Chainlink price right now: last print + the Coinbase move since that print."""
+    def estimate_now(self, now: float, max_adjust: float | None = None) -> float | None:
+        """Best estimate of the Chainlink price right now: last print + the Coinbase move since that print.
+        `max_adjust` caps that move (USD): Chainlink aggregates many venues, so a sudden Coinbase-only spike
+        shouldn't be extrapolated in full."""
         if self.chainlink.last_sec is None:
             return None
         cl_sec = self.chainlink.last_sec
@@ -41,7 +43,10 @@ class AssetPrices:
         spot_then = self.spot.at(cl_sec + 0.999)
         if spot_then is None:
             return cl_val
-        return cl_val + (spot_last[1] - spot_then)
+        move = spot_last[1] - spot_then
+        if max_adjust is not None:
+            move = max(-max_adjust, min(max_adjust, move))
+        return cl_val + move
 
     def momentum_bp(self, window_s: float, now: float) -> float | None:
         m = self.spot.move_bp(window_s, now)

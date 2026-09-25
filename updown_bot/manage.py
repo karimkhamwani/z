@@ -78,7 +78,7 @@ def ensure_venv() -> None:
 
 def test() -> None:
     ensure_venv()
-    code = call([str(VENV_PY), "-m", "unittest", "-v", "tests.test_core"])
+    code = call([str(VENV_PY), "-m", "unittest", "discover", "-s", "tests", "-t", ".", "-v"])
     if code:
         sys.exit(code)
 

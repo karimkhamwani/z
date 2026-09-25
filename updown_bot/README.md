@@ -118,6 +118,11 @@ Live halts are sticky until you restart. The reason is shown on the dashboard an
 ### Run it unattended
 Use `python manage.py run --live` under a service manager that restarts it: Task Scheduler or NSSM on Windows, `launchd` on macOS, `systemd` on Linux. On restart it resumes its state and cancels stray orders.
 
+### Lessons from the first live session (Sep 24)
+- **Don't restart often.** Every restart skips the current window, and a restart more than 15 min after the last stop has to re-measure volatility. The first session restarted 6 times in 30 min, and **8 of its 12 fills were placed on the default volatility**, which lost $14.49 of the $21.47. The bot now refuses to trade on the default.
+- **"No orders found to match" is normal:** a fill-and-kill order found nothing at your price. It now counts as a no-fill, not an error.
+- **The first order in a market used to take ~2 s** (the SDK loading market details); the bot now loads them as soon as a market appears. Other orders take ~0.6 s.
+
 ### Before real money: know the gap
 Paper assumed 300 ms latency and 50% of displayed size. Live competes with faster bots, so start with the small caps you've set and compare the Orders panel (fill rate, latency) and fills with your paper results before raising any limit. The bot's per-fill fee is an estimate from the published formula; the balance sync always reflects the real cash.
 
@@ -130,9 +135,13 @@ Every 100 ms, for each live market:
 1. **Start price** R = mean of the Chainlink prints in the 60 s before the window opened.
 2. **Chainlink now** is estimated as the last Chainlink print plus the Coinbase move since that print. Chainlink lags about 1–2 s; Coinbase leads.
 3. **Fair value** P(Up) = Φ((E[final TWAP] − R) / sd). Seconds of the final minute that have already printed are locked in. The rest follow a random walk with σ from 30-second changes (EWMA, 10-minute half-life). See `bot/model.py`.
-4. **Signal:** the coin moved **≥ 0.5 bp in the last 3 s** toward a side, **and** that side's ask is below fair value by **≥ 2¢ after the taker fee** (fee = 0.07 × p × (1 − p) per share).
+4. **Signal:** the coin moved **≥ 0.5 bp in the last 3 s** toward a side, **and** that side's ask is below fair value by **≥ 2¢ after the taker fee** (fee = 0.07 × p × (1 − p) per share). Guards added after the first live session:
+   - **No trading until volatility is measured.** It takes about 5.5 min of Chainlink data after a fresh start. After a restart within 15 min, the saved estimate is reused, so there's no wait.
+   - **Edges above 12¢ are skipped** (`max_edge`): a disagreement that large usually means the model is wrong, not the market.
+   - **3-second moves above 5 bp are skipped** (`max_momentum_bp`).
+   - **Coinbase can shift the Chainlink estimate by at most 3 σ·√lag** (`max_spot_adjust_sigma`), so a one-exchange spike can't flip the model.
 5. **Order:** a FAK limit buy at up to ask + 2¢, never above the price that keeps 2¢ of edge after fees.
-6. **Paper fill:** wait `latency_ms` (300 ms), re-read the live book, and take at most `liquidity_haircut` (50%) of each ask level up to the limit. Fees are charged per level; fills under 5 shares or $1 are skipped.
+6. **Paper fill:** wait `latency_ms` (700 ms, matching measured live latency), re-read the live book, and take at most `liquidity_haircut` (50%) of each ask level up to the limit. Fees are charged per level; fills under 5 shares or $1 are skipped.
 7. **Settlement:** Polymarket's official result, read on-chain from the Conditional Tokens contract. Markets resolve there about 60–100 s after they end; the CLOB API's `winner` flag lags by many minutes and is only a fallback. The bot's own TWAP estimate is logged next to the official result as a check.
 8. **Rebates (estimate):** yesterday's taker fees × your tier, credited after 00:00 UTC. Tiers use the documented 30-day weighted volume.
 
