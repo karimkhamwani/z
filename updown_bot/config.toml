@@ -34,6 +34,8 @@ min_momentum_bp = 0.5          # coin must have moved >= this toward the side we
 min_edge = 0.02                # $/share required after the taker fee
 max_edge = 0.12                # skip bigger "edges": when model and market disagree that much, the model is usually wrong
 max_momentum_bp = 5.0          # skip 3-second moves bigger than this (single-exchange spikes); 0 = off
+trend_window_s = 60
+max_counter_trend_bp = 1.2     # skip buying against a 60 s move bigger than this (~$10 at BTC 84k): breakeven in paper, all lost live; 0 = off
 min_price = 0.20               # skip long shots: buys under 20¢ lost money in both analysed wallets and in live shadow
 max_price = 0.95
 min_seconds_left = 5           # don't send orders in the last N seconds

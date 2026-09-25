@@ -121,6 +121,9 @@ Use `python manage.py run --live` under a service manager that restarts it: Task
 ### Lessons from the first live session (Sep 24)
 - **Don't restart often.** Every restart skips the current window and re-measures volatility (about 5.5 min without trading). The first session restarted 6 times in 30 min, and **8 of its 12 fills were placed on the default volatility**, which lost $14.49 of the $21.47. The bot now refuses to trade on the default.
 - **"No orders found to match" is normal:** a fill-and-kill order found nothing at your price. It now counts as a no-fill, not an error.
+- **Live fills are adversely selected (Sep 24, 21:21–22:28 live session: −$14.85).** 58% of orders found nothing to match, and after the fills that did happen the market moved *against* the bot (−2.4¢ after 5 s, versus +3.9¢ in the profitable paper run). Faster bots take the genuinely stale prices; a ~600 ms order gets what's left. Latency is the deciding factor for live results.
+- **Buying against the recent trend doesn't pay.** In the 20 h paper run, buys against a 60 s move of more than ~$10 were breakeven (−0.7%); live, all of them lost. They're now skipped (`max_counter_trend_bp`).
+- **The drawdown halt could fire falsely** when a just-claimed payout was counted twice for one balance sync; the high-water mark now ignores claimable value.
 - **The first order in a market used to take ~2 s** (the SDK loading market details); the bot now loads them as soon as a market appears. Other orders take ~0.6 s.
 
 ### Latency: where it goes and how to cut it

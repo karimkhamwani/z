@@ -75,7 +75,8 @@ class Portfolio:
     realized_pnl: float = 0.0
     rebates_total: float = 0.0
     halted: str = ""
-    positions_value: float | None = None   # live: market value of all positions, from the exchange
+    positions_value: float | None = None   # live: market value of open (not yet resolved) positions
+    claimable_value: float = 0.0           # live: value of resolved winning positions not yet claimed into cash
     last_sync: float = 0.0
 
     @property
@@ -87,8 +88,17 @@ class Portfolio:
         """Paper: cash + open positions at cost. Live: the portfolio balance — pUSD cash + current value of every
         position, as synced from Polymarket."""
         if self.positions_value is not None:
-            return self.cash + self.positions_value
+            return self.cash + self.positions_value + self.claimable_value
         return self.cash + self.open_cost
+
+    @property
+    def equity_low(self) -> float:
+        """Equity without claimable winnings. Polymarket claims winnings automatically, and for one balance sync a
+        claimed payout can show up both in cash and as a still-listed position. The high-water mark uses this
+        figure, so a double count can't inflate it (Sep 24: a false $61.78 peak caused a false drawdown halt)."""
+        if self.positions_value is not None:
+            return self.cash + self.positions_value
+        return self.equity
 
     def wv_30d(self, today: str) -> float:
         d0 = (dt.date.fromisoformat(today) - dt.timedelta(days=30)).isoformat()

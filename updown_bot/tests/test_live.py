@@ -229,7 +229,8 @@ class TestAccount(unittest.TestCase):
                            wallet="0x" + "22" * 20)
         snap = asyncio.run(acct.snapshot())
         self.assertAlmostEqual(snap.cash, 12.345678)
-        self.assertAlmostEqual(snap.positions_value, 13.2)
+        self.assertAlmostEqual(snap.positions_value, 3.2)          # open positions only
+        self.assertAlmostEqual(snap.claimable_value, 10.0)         # resolved winner awaiting claim
         self.assertEqual(snap.redeemable, ["0xb"])
         self.assertEqual(snap.open_positions, 3)
 

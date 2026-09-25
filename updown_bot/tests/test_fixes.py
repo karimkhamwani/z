@@ -163,6 +163,46 @@ class TestNoMatchIsNotAnError(unittest.TestCase):
         self.assertLess(took, 1.0)
 
 
+class TestFalseDrawdownHalt(unittest.TestCase):
+    """Sep 24 22:28: 'drawdown kill: equity 39.62 is 35% below peak 61.78'. The 61.78 peak came from 21:36:07,
+    when a $10 payout was already in cash (51.78) and the same claim was still listed as a position (10.00)."""
+
+    def test_claimed_payout_cannot_inflate_the_peak(self):
+        from bot.config import Risk
+        from bot.risk import RiskManager
+        pf = Portfolio(cash=51.78, starting_equity=53.67, peak_equity=53.67, day_start_equity=53.67)
+        pf.positions_value, pf.claimable_value = 0.0, 10.00      # the double-counted moment
+        rm = RiskManager(Risk(daily_loss_stop_pct=0.5, max_drawdown_kill_pct=0.35), pf)
+        rm.check_breakers()
+        self.assertAlmostEqual(pf.peak_equity, 53.67)             # not 61.78
+        pf.cash, pf.positions_value, pf.claimable_value = 38.69, 0.93, 0.0
+        self.assertEqual(rm.check_breakers(), "")                 # 39.62 > 0.65 × 57.89 real peak → no halt
+
+    def test_claim_in_transit_cannot_trigger_a_stop(self):
+        from bot.config import Risk
+        from bot.risk import RiskManager
+        pf = Portfolio(cash=30.0, starting_equity=53.67, peak_equity=50.0, day_start_equity=53.67)
+        pf.positions_value, pf.claimable_value = 0.0, 20.0        # payout resolved, not yet in cash
+        self.assertEqual(RiskManager(Risk(daily_loss_stop_pct=0.5, max_drawdown_kill_pct=0.35), pf).check_breakers(), "")
+
+
+class TestCounterTrend(unittest.TestCase):
+    def kw(self, trend):
+        now = 1000.0
+        return dict(books={"Up": book(0.40, now), "Down": book(0.61, now)}, now=now, seconds_left=150,
+                    seconds_elapsed=150, fee_rate=0.07, tick=0.01, max_slippage=0.05, trend_bp=trend)
+
+    def test_uptick_inside_a_downtrend_is_skipped(self):
+        intent, rej = evaluate(Strategy(), p_up=0.47, momentum_bp=0.8, **self.kw(-2.0))   # 60 s: −2 bp
+        self.assertIsNone(intent)
+        self.assertEqual(rej[0].reason, "counter_trend")
+
+    def test_with_trend_or_flat_still_trades(self):
+        for trend in (+2.0, 0.0, -1.0):
+            intent, _ = evaluate(Strategy(), p_up=0.47, momentum_bp=0.8, **self.kw(trend))
+            self.assertEqual(intent.outcome, "Up", trend)
+
+
 class TestPrewarm(unittest.TestCase):
     def test_prewarm_loads_each_token(self):
         seen = []

@@ -200,9 +200,11 @@ class Engine:
                 p = self.prices[m.asset]
                 mom = p.momentum_bp(sc.momentum_window_s, now)
                 books = {"Up": self.books.book(m.up_token), "Down": self.books.book(m.down_token)}
+                trend = p.spot.move_bp(sc.trend_window_s, now) if sc.max_counter_trend_bp else None
                 intent, rejs = evaluate(sc, p_up=fv.p_up, momentum_bp=mom, books=books, now=now,
                                         seconds_left=m.end - now, seconds_elapsed=now - m.start,
-                                        fee_rate=m.fee_rate, tick=m.tick, max_slippage=self.cfg.execution.max_slippage)
+                                        fee_rate=m.fee_rate, tick=m.tick, max_slippage=self.cfg.execution.max_slippage,
+                                        trend_bp=trend)
                 for r in rejs:
                     key = (m.slug, r.outcome, r.reason)
                     if now - self.last_order.get(key, 0) > 1.0:   # log each reason at most 1/s per side
@@ -319,15 +321,18 @@ class Engine:
                 failures = 0
                 self.pf.cash = snap.cash
                 self.pf.positions_value = snap.positions_value
+                self.pf.claimable_value = snap.claimable_value
                 self.pf.last_sync = snap.ts
                 if self.needs_initial_equity:
                     eq = self.pf.equity
-                    self.pf.starting_equity = self.pf.peak_equity = self.pf.day_start_equity = eq
+                    self.pf.starting_equity = self.pf.day_start_equity = eq
+                    self.pf.peak_equity = self.pf.equity_low
                     self.needs_initial_equity = False
                     log.info("starting capital set from portfolio balance: %.2f (cash %.2f + positions %.2f)",
                              eq, snap.cash, snap.positions_value)
-                self.pf.peak_equity = max(self.pf.peak_equity, self.pf.equity)
-                self.account_info = {"cash": snap.cash, "positions_value": snap.positions_value,
+                self.pf.peak_equity = max(self.pf.peak_equity, self.pf.equity_low)
+                self.account_info = {"cash": snap.cash, "positions_value": snap.positions_value + snap.claimable_value,
+                                     "claimable_value": snap.claimable_value,
                                      "open_positions": snap.open_positions, "redeemable": len(snap.redeemable),
                                      "last_sync": snap.ts, "error": ""}
                 self.ledger.account({"ts": snap.ts, "cash": snap.cash, "positions_value": snap.positions_value,

@@ -238,7 +238,7 @@ function renderLive() {
     acct.hidden = false; acct.className = "acct " + mode;
     const sync = L.sync_age_s == null ? "not yet" : Math.round(L.sync_age_s) + "s ago";
     acct.innerHTML = `<span>wallet <b>${L.wallet}</b> (${L.wallet_type})</span>
-      <span>pUSD cash <b>${usd(L.cash)}</b></span><span>positions <b>${usd(L.positions_value)}</b> (${L.open_positions ?? 0} open${L.redeemable ? `, ${L.redeemable} to claim` : ""})</span>
+      <span>pUSD cash <b>${usd(L.cash)}</b></span><span>positions <b>${usd(L.positions_value)}</b> (${L.open_positions ?? 0} open${L.redeemable ? `, ${usd(L.claimable_value)} being claimed` : ""})</span>
       <span>balance synced <b style="color:${L.sync_age_s != null && L.sync_age_s < 60 ? "" : "var(--down)"}">${sync}</b></span>
       <span>claiming <b>${L.can_redeem ? "automatic" : "manual"}</b></span>
       <span>kill switch <b style="color:${L.kill_switch ? "var(--down)" : ""}">${L.kill_switch ? "ON — no new orders" : "off"}</b></span>

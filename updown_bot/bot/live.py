@@ -34,10 +34,11 @@ class HaltTrading(RuntimeError):
 class AccountSnapshot:
     ts: float
     cash: float                 # pUSD available to trade
-    positions_value: float      # current value of every open or redeemable position
+    positions_value: float      # current value of open (unresolved) positions
     redeemable: list[str]       # condition ids with a winning (value > 0) redeemable position
     open_positions: int
     raw_balance: int
+    claimable_value: float = 0.0   # value of resolved winning positions not yet claimed
 
 
 @dataclass
@@ -65,7 +66,7 @@ class LiveAccount:
     async def snapshot(self) -> AccountSnapshot:
         bal = await self.client.get_balance_allowance(asset_type="COLLATERAL")
         cash = bal.balance / 1e6                                   # pUSD has 6 decimals
-        value = 0.0
+        value = claimable = 0.0
         redeemable: list[str] = []
         n_open = 0
         async for p in self.client.list_positions(user=self.wallet).iter_items():
@@ -73,11 +74,14 @@ class LiveAccount:
             if size <= 0:
                 continue
             v = float(p.current_value or 0)
-            value += v
             n_open += 1
-            if p.redeemable and v > 0:
-                redeemable.append(str(p.condition_id))
-        return AccountSnapshot(time.time(), cash, value, redeemable, n_open, int(bal.balance))
+            if p.redeemable:
+                if v > 0:
+                    redeemable.append(str(p.condition_id))
+                    claimable += v
+            else:
+                value += v
+        return AccountSnapshot(time.time(), cash, value, redeemable, n_open, int(bal.balance), claimable)
 
     async def redeem(self, condition_id: str) -> str | None:
         if not self.creds.can_redeem:

@@ -43,6 +43,8 @@ class Strategy:
     min_edge: float = 0.02
     max_edge: float = 0.12                 # skip "edges" bigger than this (0 = off)
     max_momentum_bp: float = 5.0           # skip 3-second moves bigger than this: single-venue spikes (0 = off)
+    trend_window_s: float = 60
+    max_counter_trend_bp: float = 1.2      # skip buys against a 60 s move bigger than this (0 = off)
     min_price: float = 0.20
     max_price: float = 0.95
     min_seconds_left: float = 5

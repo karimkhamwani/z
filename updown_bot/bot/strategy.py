@@ -40,8 +40,8 @@ def max_limit_for_edge(fair: float, min_edge: float, fee_rate: float, tick: floa
 
 
 def evaluate(cfg: Strategy, *, p_up: float, momentum_bp: float | None, books: dict[str, Book | None], now: float,
-             seconds_left: float, seconds_elapsed: float, fee_rate: float, tick: float, max_slippage: float
-             ) -> tuple[Intent | None, list[Rejection]]:
+             seconds_left: float, seconds_elapsed: float, fee_rate: float, tick: float, max_slippage: float,
+             trend_bp: float | None = None) -> tuple[Intent | None, list[Rejection]]:
     rejections: list[Rejection] = []
     if momentum_bp is None or seconds_left < cfg.min_seconds_left or seconds_elapsed < cfg.min_seconds_elapsed:
         return None, rejections
@@ -53,6 +53,11 @@ def evaluate(cfg: Strategy, *, p_up: float, momentum_bp: float | None, books: di
         if cfg.max_momentum_bp and directional > cfg.max_momentum_bp:
             rejections.append(Rejection(outcome, "momentum_spike", fair, None, None, momentum_bp))
             continue
+        if cfg.max_counter_trend_bp and trend_bp is not None:
+            with_trend = trend_bp if outcome == "Up" else -trend_bp
+            if with_trend < -cfg.max_counter_trend_bp:   # a small uptick inside a bigger move the other way
+                rejections.append(Rejection(outcome, "counter_trend", fair, None, None, momentum_bp))
+                continue
         book = books.get(outcome)
         if book is None or book.age(now) > cfg.max_book_age_s:
             rejections.append(Rejection(outcome, "stale_book", fair, None, None, momentum_bp))

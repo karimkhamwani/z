@@ -29,8 +29,8 @@ class RiskManager:
 
     def check_breakers(self) -> str:
         pf = self.pf
-        eq = pf.equity
-        pf.peak_equity = max(pf.peak_equity, eq)
+        eq = pf.equity                                   # stops use the full figure: a claim in transit can't trigger them
+        pf.peak_equity = max(pf.peak_equity, pf.equity_low)   # the peak can't be inflated by a double-counted claim
         if pf.halted.startswith(("drawdown", "live")):
             return pf.halted
         if eq <= pf.peak_equity * (1 - self.cfg.max_drawdown_kill_pct):
