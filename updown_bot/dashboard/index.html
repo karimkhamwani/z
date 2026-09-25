@@ -245,7 +245,8 @@ function renderLive() {
       ${mode === "shadow" ? "<span><b>orders are not sent</b></span>" : ""}${L.error ? `<span style="color:var(--down)">sync error: ${L.error}</span>` : ""}
       ${L.cash != null && L.cash < L.min_cash_usd ? `<span style="color:var(--down)">cash below $${L.min_cash_usd}: not opening positions</span>` : ""}`;
   } else acct.hidden = true;
-  $("feeds").innerHTML = feedPill("coinbase", live.feeds.coinbase) + feedPill("chainlink", live.feeds.chainlink) + feedPill("clob", live.feeds.clob);
+  $("feeds").innerHTML = feedPill("coinbase", live.feeds.coinbase) + feedPill("chainlink", live.feeds.chainlink) + feedPill("clob", live.feeds.clob)
+    + (live.book_lag_ms != null ? `<span class="pill"><span class="dot ${live.book_lag_ms < 250 ? "ok" : live.book_lag_ms < 500 ? "warn" : "bad"}"></span>book lag ${live.book_lag_ms} ms</span>` : "");
   const b = $("banner");
   if (live.portfolio && live.halted) { b.hidden = false; b.className = "banner"; b.textContent = "HALTED — " + live.halted; }
   else b.hidden = true;

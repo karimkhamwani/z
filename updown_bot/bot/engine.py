@@ -126,7 +126,8 @@ class Engine:
                     self._close_market(m)
                     del self.markets[slug]
                     self.refs.pop(slug, None)
-            self.books.set_tokens({t for m in self.markets.values() for t in (m.up_token, m.down_token)})
+            self.books.set_tokens({t for m in self.markets.values() if m.start - 10 <= now < m.end
+                                   for t in (m.up_token, m.down_token)})
             await asyncio.sleep(1.0)
 
     def _close_market(self, m: Market) -> None:
@@ -186,6 +187,14 @@ class Engine:
             await self._next_tick()
             now = time.time()
             if self.risk.check_breakers() or self._live_blocked(now):
+                continue
+            lag = self.books.feed_lag()
+            if lag > sc.max_feed_lag_s:
+                if now - self.last_order.get(("feed", "lag"), 0) > 5:
+                    self.last_order[("feed", "lag")] = now
+                    self.ledger.rejection({"ts": now, "slug": "", "outcome": "", "reason": "feed_lagging",
+                                           "fair": None, "ask": None, "edge": None, "momentum_bp": None,
+                                           "seconds_left": lag})
                 continue
             for m in list(self.markets.values()):
                 if not (m.start <= now < m.end):
@@ -415,6 +424,7 @@ class Engine:
                     "can_redeem": bool(self.account.creds.can_redeem and self.cfg.live.redeem_winnings),
                     "min_cash_usd": self.cfg.live.min_cash_usd, **self.account_info}
         st = {"ts": now, "mode": self.cfg.mode, "live": live, "started": self.started, "feeds": dict(self.status),
+              "book_lag_ms": round(self.books.feed_lag() * 1000), "book_msgs": self.books.msgs,
               "halted": pf.halted, "stats": dict(self.stats), "pending_settlement": len(self.pending),
               "portfolio": {"equity": pf.equity, "cash": pf.cash, "open_cost": pf.open_cost, "peak": pf.peak_equity,
                             "positions_value": pf.positions_value,

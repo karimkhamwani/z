@@ -41,6 +41,7 @@ max_price = 0.95
 min_seconds_left = 5           # don't send orders in the last N seconds
 min_seconds_elapsed = 3        # wait for the start reference to be known
 max_book_age_s = 2.0           # skip if the book hasn't updated recently
+max_feed_lag_s = 0.5           # skip while the order-book feed runs this far behind Polymarket (slow machine / network)
 side_cooldown_s = 2.0          # min gap between orders on the same side of a market
 max_orders_per_market = 30
 

@@ -50,6 +50,7 @@ class Strategy:
     min_seconds_left: float = 5
     min_seconds_elapsed: float = 3
     max_book_age_s: float = 2.0
+    max_feed_lag_s: float = 0.5          # don't trade while the order-book feed runs this far behind Polymarket
     side_cooldown_s: float = 2.0
     max_orders_per_market: int = 30
 
